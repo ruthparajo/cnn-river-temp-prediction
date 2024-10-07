@@ -1,0 +1,1 @@
+pip install -r /content/gdrive/MyDrive/TFG/requirements.txt
