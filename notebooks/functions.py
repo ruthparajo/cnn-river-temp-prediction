@@ -1,14 +1,3 @@
-import subprocess
-# Define the path to the install_dependencies.sh script
-script_path = '/content/gdrive/MyDrive/TFG/install_dependencies.sh'
-
-# Run the shell script
-try:
-    subprocess.run(['bash', script_path], check=True)
-    print("Dependencies installed successfully.")
-except subprocess.CalledProcessError as e:
-    print(f"Error occurred while running the script: {e}")
-
 import rasterio
 import pandas as pd
 import os
