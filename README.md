@@ -28,6 +28,15 @@ Files:
 - waterTemperature_monthly_1981-2014.nc: global water temp dataset
  
 # Instructions
+## How to connect to SentinelHub:
+1. Create an account
+2. Go to User setttings > OAuth clients
+3. Create an active OAuth client key
+4. Copy the client id and the secret client id to the configuration
+5. Go to Configuration Utility and create a new configuration or use an existing one
+6. Copy the instance Id to the SentinelHub configuration
+
+
 ## Steps to upload directly to drive
 1. Download the credentials file:
     - Go to the Google Developers Console.
