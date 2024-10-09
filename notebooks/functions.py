@@ -8,6 +8,8 @@ from skimage.transform import resize
 import openpyxl
 from openpyxl import load_workbook
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from rasterio.transform import from_origin
+import shutil
 
 
 def load_raster(filepath,rgb = True):
@@ -246,3 +248,53 @@ def split_data_df(X, y, validation_split=0.1, test_split=0.1):
     train_target = y.iloc[train_index].values
 
     return train_input, train_target, validation_input, validation_target, test_input, test_target
+
+def plot_image(image, factor=1.0, clip_range=None, **kwargs):
+    """
+    Utility function for plotting RGB images.
+    """
+    fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(15, 15))
+    if clip_range is not None:
+        ax.imshow(np.clip(image * factor, *clip_range), **kwargs)
+    else:
+        ax.imshow(image * factor, **kwargs)
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+
+# Function to clear the contents of a directory
+def clear_directory(directory):
+    if os.path.exists(directory):
+        for file in os.listdir(directory):
+            file_path = os.path.join(directory, file)
+            try:
+                if os.path.isfile(file_path) or os.path.islink(file_path):
+                    os.remove(file_path)
+                elif os.path.isdir(file_path):
+                    shutil.rmtree(file_path)
+            except Exception as e:
+                print(f'Error deleting {file_path}. Reason: {e}')
+
+def save_raster(raster_array,filepath,shp):
+    resolution = 30
+    x_min, y_min, x_max, y_max = shp.total_bounds
+    transform = from_origin(x_min, y_max, resolution, resolution)
+
+    with rasterio.open(
+        filepath,
+        'w',
+        driver='GTiff',
+        height=raster_array.shape[0],
+        width=raster_array.shape[1],
+        count=len(raster_array.shape),
+        dtype=raster_array.dtype,
+        crs=shp.crs.to_string(),  # Ensure correct CRS
+        transform=transform,
+        nodata=0.0
+    ) as dst:
+        if len(raster_array.shape) == 3:
+            dst.write(raster_array[:, :, 0], 1)  # Red channel
+            dst.write(raster_array[:, :, 1], 2)  # Green channel
+            dst.write(raster_array[:, :, 2], 3)  # Blue channel
+        else:
+            dst.write(raster_array, 1)
