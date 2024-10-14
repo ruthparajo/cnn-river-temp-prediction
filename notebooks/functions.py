@@ -8,6 +8,9 @@ from skimage.transform import resize
 import openpyxl
 from openpyxl import load_workbook
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from rasterio.transform import from_origin
+import shutil
+import matplotlib.pyplot as plt
 
 
 def load_raster(filepath,rgb = True):
@@ -190,7 +193,7 @@ def update_excel_with_results(file_path, model_name, metrics, details):
     # Save the Excel file
     workbook.save(file_path)
 
-def save_excel(file_path, model_name, dicc, excel=None):
+def save_excel(file_path, dicc, excel=None):
     # Check if the Excel file exists
     if not os.path.exists(file_path):
         # Create a new Excel workbook and add a sheet
@@ -201,7 +204,7 @@ def save_excel(file_path, model_name, dicc, excel=None):
         else:
             sheet.title = "Model Details"
         # Write the header based on the metric keys
-        header = ["Model Name"] + list(dicc.keys())
+        header = list(dicc.keys())
         sheet.append(header)
     else:
         # Load existing Excel workbook
@@ -212,7 +215,7 @@ def save_excel(file_path, model_name, dicc, excel=None):
     next_row = sheet.max_row + 1
     
     # Prepare the row with model name, metrics, and details
-    row = [model_name] + list(dicc.values())
+    row = list(dicc.values())
     
     # Append the row data to the next available row
     for col_num, value in enumerate(row, start=1):
@@ -246,3 +249,127 @@ def split_data_df(X, y, validation_split=0.1, test_split=0.1):
     train_target = y.iloc[train_index].values
 
     return train_input, train_target, validation_input, validation_target, test_input, test_target
+
+def plot_image(image, factor=1.0, clip_range=None, **kwargs):
+    """
+    Utility function for plotting RGB images.
+    """
+    fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(15, 15))
+    if clip_range is not None:
+        ax.imshow(np.clip(image * factor, *clip_range), **kwargs)
+    else:
+        ax.imshow(image * factor, **kwargs)
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+
+# Function to clear the contents of a directory
+def clear_directory(directory):
+    if os.path.exists(directory):
+        for file in os.listdir(directory):
+            file_path = os.path.join(directory, file)
+            try:
+                if os.path.isfile(file_path) or os.path.islink(file_path):
+                    os.remove(file_path)
+                elif os.path.isdir(file_path):
+                    shutil.rmtree(file_path)
+            except Exception as e:
+                print(f'Error deleting {file_path}. Reason: {e}')
+
+def save_raster(raster_array,filepath,shp):
+    resolution = 30
+    x_min, y_min, x_max, y_max = shp.total_bounds
+    transform = from_origin(x_min, y_max, resolution, resolution)
+
+    with rasterio.open(
+        filepath,
+        'w',
+        driver='GTiff',
+        height=raster_array.shape[0],
+        width=raster_array.shape[1],
+        count=len(raster_array.shape),
+        dtype=raster_array.dtype,
+        crs=shp.crs.to_string(),  # Ensure correct CRS
+        transform=transform,
+        nodata=0.0
+    ) as dst:
+        if len(raster_array.shape) == 3:
+            dst.write(raster_array[:, :, 0], 1)  # Red channel
+            dst.write(raster_array[:, :, 1], 2)  # Green channel
+            dst.write(raster_array[:, :, 2], 3)  # Blue channel
+        else:
+            dst.write(raster_array, 1)
+
+
+def distance_matrix(x0, y0, x1, y1):
+    """
+    Calculate distance matrix.
+    Note: from <http://stackoverflow.com/questions/1871536>
+    """
+
+    obs = np.vstack((x0, y0)).T
+    interp = np.vstack((x1, y1)).T
+
+    d0 = np.subtract.outer(obs[:, 0], interp[:, 0])
+    d1 = np.subtract.outer(obs[:, 1], interp[:, 1])
+
+    # calculate hypotenuse
+    return np.hypot(d0, d1)
+
+
+def simple_idw(x, y, z, xi, yi, beta=2):
+    """
+    Simple inverse distance weighted (IDW) interpolation
+    x`, `y`,`z` = known data arrays containing coordinates and data used for interpolation
+    `xi`, `yi` =  two arrays of grid coordinates
+    `beta` = determines the degree to which the nearer point(s) are preferred over more distant points.
+            Typically 1 or 2 (inverse or inverse squared relationship)
+    """
+
+    dist = distance_matrix(x, y, xi, yi)
+
+    # In IDW, weights are 1 / distance
+    # weights = 1.0/(dist+1e-12)**power
+    weights = dist ** (-beta)
+
+    # Make weights sum to one
+    weights /= weights.sum(axis=0)
+
+    # Multiply the weights for each interpolated point by all observed Z-values
+    return np.dot(weights.T, z)
+
+
+def project_linestrings_to_points(gdf):
+    x_coords = []
+    y_coords = []
+    z_coords = []
+
+    # Extract coordinates from LineStrings and store them as points
+    for i, row in gdf.iterrows():
+        if row.geometry.geom_type == 'LineString':
+            for coord in row.geometry.coords:
+                x_coords.append(coord[0])
+                y_coords.append(coord[1])
+                if len(coord) == 3:
+                    z_coords.append(coord[2])
+
+                '''x, y = coord[:2]  # Desempaquetar solo x e y, ignorar z si existe
+                x_coords.append(x)
+                y_coords.append(y)'''
+
+    # Plot the points on a 2D grid
+    plt.figure(figsize=(10, 10))
+    plt.scatter(x_coords, y_coords, color='blue', s=10, label='Coordinates')
+
+    # Customize the plot
+    plt.title('Projected Coordinates (Points) in EPSG:2056', fontsize=15)
+    plt.xlabel('Easting (meters)', fontsize=12)
+    plt.ylabel('Northing (meters)', fontsize=12)
+
+    # Add gridlines
+    plt.grid(True)
+
+    # Show the plot
+    plt.legend()
+    plt.show()
+    return x_coords, y_coords, z_coords
