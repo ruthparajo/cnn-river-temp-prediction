@@ -346,16 +346,23 @@ def project_linestrings_to_points(gdf):
 
     # Extract coordinates from LineStrings and store them as points
     for i, row in gdf.iterrows():
-        if row.geometry.geom_type == 'LineString':
+        geom = row.geometry
+        if geom.geom_type == 'LineString':
             for coord in row.geometry.coords:
                 x_coords.append(coord[0])
                 y_coords.append(coord[1])
                 if len(coord) == 3:
                     z_coords.append(coord[2])
 
-                '''x, y = coord[:2]  # Desempaquetar solo x e y, ignorar z si existe
-                x_coords.append(x)
-                y_coords.append(y)'''
+        elif geom.geom_type == 'MultiLineString':
+            # Si es MultiLineString, recorre cada LineString
+            for linestring in geom.geoms:
+                for coord in linestring.coords:
+                    x_coords.append(coord[0])
+                    y_coords.append(coord[1])
+                    if len(coord) == 3:
+                        z_coords.append(coord[2])
+
 
     # Plot the points on a 2D grid
     plt.figure(figsize=(10, 10))
