@@ -68,12 +68,26 @@ def get_data_request(time_interval, evalscript, bbox, size, data_type, folder):
         config=config
     )
 
+def adjust_size(size, max_size=2500):
+    """ Adjusts the size so that none of the axes exceed max_size, maintaining the aspect ratio """
+    width, height = size
+    max_dimension = max(width, height)
+
+    if max_dimension > max_size:
+        scale_factor = max_size / max_dimension
+        width = int(width * scale_factor)
+        height = int(height * scale_factor)
+
+    return width, height
+
 def get_data(shp, evalscript, time_intervals, data_type, folder):
     coords_wgs84 = list(shp.total_bounds)#[lon_min, lat_min, lon_max, lat_max]
     resolution = 30
     bbox = BBox(bbox=coords_wgs84, crs=CRS.WGS84)
     # extract the size based on bbx and the resolution
     size = bbox_to_dimensions(bbox, resolution=resolution)
+
+    size = adjust_size(size)
 
     # create a list of requests
     list_of_requests = [get_data_request(slot, evalscript, bbox, size, data_type, folder) for slot in time_intervals]
