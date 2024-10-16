@@ -314,15 +314,28 @@ def simple_idw(x, y, z, xi, yi, beta=2):
     `beta` = determines the degree to which the nearer point(s) are preferred over more distant points.
             Typically 1 or 2 (inverse or inverse squared relationship)
     """
+    print('Fent')
 
     dist = distance_matrix(x, y, xi, yi)
+
+    
+    '''weights = 1.0 / (dist + 1e-12) ** beta
+    
+    # Verificar si la suma de pesos es válida
+    sum_weights = weights.sum(axis=0)
+    
+    # Normalizar los pesos
+    weights /= sum_weights + 1e-12'''
 
     # In IDW, weights are 1 / distance
     # weights = 1.0/(dist+1e-12)**power
     weights = dist ** (-beta)
-
+    
     # Make weights sum to one
     weights /= weights.sum(axis=0)
+
+    weights = np.nan_to_num(weights, nan=0.0)
+    z = np.nan_to_num(z, nan=0.0)
 
     # Multiply the weights for each interpolated point by all observed Z-values
     return np.dot(weights.T, z)
