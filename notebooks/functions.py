@@ -24,18 +24,16 @@ def load_raster(filepath,rgb = True):
     else:
       return src.read(1), src
       
-
 def resize_image(image, new_width, new_height):
     return resize(image, (new_height, new_width), preserve_range=True)
-    
-# Function to extract the year and month from the filename
+
 def extract_year_month_from_filename(filename):
+    # Function to extract the year and month from the filename
     # Adjust regex to match the YYYY-MM format
     match = re.search(r'(\d{4})-(\d{2})', filename)
     if match:
         return match.group(0)  # Return the matched year and month as a string (YYYY-MM)
     return None
-
 
 def load_data(dir_paths, W=None, rgb=[], show=None):
     data = {}
@@ -65,10 +63,6 @@ def load_data(dir_paths, W=None, rgb=[], show=None):
         time_slots.append(times)
 
     return data, time_slots
-
-# Example usage:
-# dir_paths = ['path/to/dir1', 'path/to/dir2']
-# rgb = [True, False]
 
 def split_data(X, y, validation_split=0.1, test_split=0.1):
     """
@@ -224,8 +218,6 @@ def save_excel(file_path, dicc, excel=None):
     # Save the Excel file
     workbook.save(file_path)
 
-    
-
 def split_data_df(X, y, validation_split=0.1, test_split=0.1):
     n = X.shape[0]  # Número de muestras
     rem_index = np.arange(n)  # Array de todos los índices
@@ -262,9 +254,8 @@ def plot_image(image, factor=1.0, clip_range=None, **kwargs):
     ax.set_xticks([])
     ax.set_yticks([])
 
-
-# Function to clear the contents of a directory
 def clear_directory(directory):
+    # Function to clear the contents of a directory
     if os.path.exists(directory):
         for file in os.listdir(directory):
             file_path = os.path.join(directory, file)
@@ -300,7 +291,6 @@ def save_raster(raster_array,filepath,shp):
         else:
             dst.write(raster_array, 1)
 
-
 def distance_matrix(x0, y0, x1, y1):
     """
     Calculate distance matrix.
@@ -315,7 +305,6 @@ def distance_matrix(x0, y0, x1, y1):
 
     # calculate hypotenuse
     return np.hypot(d0, d1)
-
 
 def simple_idw(x, y, z, xi, yi, beta=2):
     """
@@ -337,7 +326,6 @@ def simple_idw(x, y, z, xi, yi, beta=2):
 
     # Multiply the weights for each interpolated point by all observed Z-values
     return np.dot(weights.T, z)
-
 
 def project_linestrings_to_points(gdf):
     x_coords = []
