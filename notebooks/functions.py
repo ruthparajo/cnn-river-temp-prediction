@@ -106,8 +106,11 @@ def split_data(X, y, validation_split=0.1, test_split=0.1):
 
     return train_index, validation_index, test_index#train_input, train_target, validation_input, validation_target, test_input, test_target
 
+<<<<<<< HEAD
+=======
 
 
+>>>>>>> 2f550942ad6a82cd95b4b4d7695963943c636dcc
 def evaluate_model(y_true, y_pred):
     """
     Returns useful metrics for evaluating a linear regression model for temperature prediction.
