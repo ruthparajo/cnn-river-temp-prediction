@@ -104,7 +104,7 @@ def split_data(X, y, validation_split=0.1, test_split=0.1):
     train_input = X[train_index, :] / 255.0  # Normalize inputs
     train_target = y[train_index, :]
 
-    return train_input, train_target, validation_input, validation_target, test_input, test_target
+    return train_index, validation_index, test_index#train_input, train_target, validation_input, validation_target, test_input, test_target
 
 def evaluate_model(y_true, y_pred):
     """
