@@ -10,6 +10,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import matplotlib
 import seaborn as sns
 from sklearn.preprocessing import OneHotEncoder
+import gc
 
 
 # Load data
@@ -24,7 +25,7 @@ for subdir, dirs, files in os.walk(source_folder):
 
 
 source_path = '../data/preprocessed/'
-data_paths = ['lst', 'ndvi', 'wt', 'masked','discharge', 'slope']#, 'wt_interpolated']
+data_paths = ['lst','wt','masked']#, 'ndvi', 'wt', 'masked','discharge', 'slope']#, 'wt_interpolated']
 dir_paths = [os.path.join(source_path,p) for p in data_paths]
 all_dir_paths = {k:[] for k in data_paths}
 
@@ -211,6 +212,8 @@ if '__main__':
         for batch_size in batch_sizes:
             for epochs in epochs_list:
                 run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inputs=inputs)
+                gc.collect()
                 if model_name == 'img_wise_CNN':
                     run_experiment(model_name, batch_size, epochs, W=256, conditioned=True, inputs=inputs)
+                
 
