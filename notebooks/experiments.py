@@ -212,7 +212,7 @@ if '__main__':
         for batch_size in batch_sizes:
             for epochs in epochs_list:
                 run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inputs=inputs)
-                gc.collect()
+                #gc.collect()
                 if model_name == 'img_wise_CNN':
                     run_experiment(model_name, batch_size, epochs, W=256, conditioned=True, inputs=inputs)
                 
