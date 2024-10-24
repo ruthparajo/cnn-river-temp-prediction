@@ -381,3 +381,25 @@ def project_linestrings_to_points(gdf):
     plt.legend()
     plt.show()
     return x_coords, y_coords, z_coords
+
+def split_data_stratified(inputs, data_targets, labels, labels_encoded):
+    # 1. Obtener las etiquetas únicas
+    unique_labels, label_indices = np.unique(labels, return_inverse=True)
+    
+    # 2. Hacer una división estratificada en función de las etiquetas únicas
+    train_label_idx, temp_label_idx = train_test_split(unique_labels, test_size=0.4, random_state=42)
+    
+    # Dividir el conjunto temporal (val y test)
+    val_label_idx, test_label_idx = train_test_split(temp_label_idx, test_size=0.5, random_state=42)
+    
+    # 3. Crear máscaras booleanas en base a las etiquetas
+    train_mask = np.isin(labels, train_label_idx)
+    val_mask = np.isin(labels, val_label_idx)
+    test_mask = np.isin(labels, test_label_idx)
+    
+    # 4. Aplicar las máscaras booleanas para filtrar los datos
+    train_input, train_target, train_rivers = inputs[train_mask] / 255.0, data_targets[train_mask], labels_encoded[train_mask]
+    validation_input, validation_target, val_rivers= inputs[val_mask] / 255.0, data_targets[val_mask], labels_encoded[val_mask]
+    test_input, test_target, test_rivers = inputs[test_mask] / 255.0, data_targets[test_mask], labels_encoded[test_mask]
+    labels_train, labels_val, labels_test = labels[train_mask], labels[val_mask], labels[test_mask]
+    return train_input, train_target, train_rivers, validation_input, validation_target, val_rivers, test_input, test_target, test_rivers, labels_train, labels_val, labels_test
