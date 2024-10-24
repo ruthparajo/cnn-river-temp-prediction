@@ -3,4 +3,10 @@ trash/
 maps/
 notebooks/01-data_collection.ipynb
 notebooks/03-data_preprocessing_temp.ipynb
+<<<<<<< HEAD
 notebooks/01-river_grids_collection.ipynb
+=======
+notebooks/03-interpolation.ipynb
+notebooks/01-river_grids_collection.ipynb
+notebooks/.ipynb_checkpoints/
+>>>>>>> 6898d4bd0b794382785e8b0dcf8f3b911cda198e
