@@ -212,7 +212,11 @@ if '__main__':
         for batch_size in batch_sizes:
             for epochs in epochs_list:
                 run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inputs=inputs)
+<<<<<<< HEAD
                 #gc.collect()
+=======
+                gc.collect()
+>>>>>>> d0d2a6c5959e41097a4d7fd3cfd9ba58a997623c
                 if model_name == 'img_wise_CNN':
                     run_experiment(model_name, batch_size, epochs, W=256, conditioned=True, inputs=inputs)
                 
