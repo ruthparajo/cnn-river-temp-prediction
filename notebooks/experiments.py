@@ -13,6 +13,7 @@ from sklearn.preprocessing import OneHotEncoder
 import gc
 import time
 from datetime import datetime
+import numpy as np
 
 
 # -------------------------------- Load data --------------------------------
@@ -108,7 +109,7 @@ def get_results(test_target, test_prediction, rivers, labels, test_index):
     return mean_results
 
 
-def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inputs=None, stratified=None):
+def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inputs=None, stratified=None, physics_guided=None):
     print(f"Running experiment with model={model_name}, batch_size={batch_size}, epochs={epochs}")
     
     # Choose inputs
@@ -179,12 +180,33 @@ def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inp
     elif model_name == 'transfer_learning_VGG16':
         train_input = train_input[:, :, :, :3]
         model = build_transfer_model((W, W, 3))
-    model.compile(optimizer='adam', loss='mean_squared_error', metrics=['mae'])
-
+    
     
     # Train the model
-    history = model.fit(model_input, train_target, batch_size=batch_size, epochs=epochs, validation_data=(val_model_input, validation_target))
+    if not physics_guided:
+        model.compile(optimizer='adam', loss='mean_squared_error', metrics=['mae'])
+        history = model.fit(model_input, train_target, batch_size=batch_size, epochs=epochs, validation_data=(val_model_input, validation_target))
+    else:
+        dataset = tf.data.Dataset.from_tensor_slices((*model_input, train_target) if isinstance(model_input, tuple) else (model_input, train_target))
 
+        dataset = dataset.batch(batch_size)
+        optimizer = tf.keras.optimizers.Adam()
+        for epoch in range(epochs):
+            print(f"Epoch {epoch + 1}/{epochs}")
+            for batch in dataset:
+                # Handle batch based on whether model_input is a tuple or a single dataset
+                if isinstance(model_input, tuple):
+                    model_input_batch = batch[:-1]  # All except the last element (target_batch)
+                    target_batch = batch[-1]        # Last element is target_batch
+                else:
+                    model_input_batch, target_batch = batch  # Direct unpacking for single dataset
+
+                with tf.GradientTape() as tape:
+                    y_pred = model(*model_input_batch, training=True) if isinstance(model_input_batch, tuple) else model(model_input_batch, training=True)
+                    loss = conservation_energy_loss(target_batch, y_pred, model_input_batch, alpha=0.5, beta=0.5)
+                gradients = tape.gradient(loss, model.trainable_variables)
+                optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+    
     
     # Evaluate results
     #validation_prediction = model.predict(val_model_input)
@@ -204,7 +226,7 @@ def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inp
     variables = ', '.join([var_inputs, laabeel,'stratified'])
     details = {'RMSE':mean_results['RMSE'],'Variables':variables,'Input': f'{len(np.unique(labels))} rivers', 'Output': 'wt', \
                'Resolution': W, 'nº samples': len(data_targets), 'Batch size': batch_size, 'Epochs': epochs, 'Date':current_date, \
-               'Time':current_time, 'Duration': duration}
+               'Time':current_time, 'Duration': duration, 'Loss': 'Physics-guided'}
     
     file_path = f"../results/{model_name}_results.xlsx"
     save_excel(file_path, details, excel = 'Results')
@@ -217,7 +239,7 @@ def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inp
 
 
 if '__main__':
-    batch_sizes = [8, 16, 32]
+    batch_sizes = [16, 32]
     epochs_list = [10, 50, 100]
     model_names = ['img_wise_CNN', 'UNet', 'CNN', 'img_2_img']
     inputs = [d for d in data_paths if d not in ['wt', 'masked']]
@@ -225,8 +247,8 @@ if '__main__':
     for model_name in model_names:
         for batch_size in batch_sizes:
             for epochs in epochs_list:
-                run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inputs=inputs, stratified = True)
-                if model_name == 'img_wise_CNN':
-                    run_experiment(model_name, batch_size, epochs, W=256, conditioned=True, inputs=inputs, stratified = True)
+                run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inputs=inputs, stratified = True, physics_guided = True)
+                #if model_name == 'img_wise_CNN':
+                 #   run_experiment(model_name, batch_size, epochs, W=256, conditioned=True, inputs=inputs, stratified = True, physics_guided = True)
                 
 
