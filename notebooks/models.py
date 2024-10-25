@@ -1,6 +1,7 @@
 import tensorflow as tf
 from tensorflow.keras import layers, models, regularizers, Input
 from tensorflow.keras.layers import concatenate
+import numpy as np
 
 
 def build_simplified_cnn_model(input_shape):
@@ -170,3 +171,48 @@ def build_transfer_model(input_shape, base_model_trainable=False):
     transfer_model = models.Model(inputs, outputs)
     
     return transfer_model
+
+# Función de error cuadrático medio
+def root_mean_squared_error(y_true, y_pred):
+    return tf.sqrt(tf.reduce_mean(tf.square(y_pred - y_true)))
+
+def conservation_energy_loss(y_true, y_pred, model_input_batch, alpha=0.5, beta=0.5, threshold=5.0):
+    # Calcular el promedio de los primeros tres canales de model_input_batch
+    lst_batch = tf.reduce_mean(tf.cast(model_input_batch[:, :, :, :3], 'float32'), axis=-1)
+
+    # Calcular Q_in y Q_out
+    Q_in = tf.maximum(lst_batch - y_pred, 0)  # Solo calor hacia el agua cuando LST > predicción
+    Q_out = tf.maximum(y_pred - lst_batch, 0) # Solo calor hacia afuera cuando predicción > LST
+
+    differences = np.abs(lst_batch - y_pred)
+    threshold = np.percentile(differences, 80)
+    
+    # Penalizar diferencias extremas: solo cuando Q_in o Q_out superen el umbral
+    extreme_penalty = tf.where(tf.abs(Q_in - Q_out) > threshold, tf.abs(Q_in - Q_out), 0)
+    physics_loss = tf.reduce_mean(extreme_penalty)
+
+    # Pérdida basada en datos (RMSE)
+    data_loss = root_mean_squared_error(y_true, y_pred)
+
+    # Pérdida total combinada
+    return alpha * data_loss + beta * physics_loss
+
+def conservation_energy_loss_v0(y_true, y_pred, model_input_batch, alpha=0.5, beta=0.5):
+    # Calcular el promedio de los primeros tres canales de model_input_batch
+    lst_batch = tf.reduce_mean(tf.cast(model_input_batch[:, :, :, :3], 'float32'), axis=-1)
+
+    # Calcular Q_in y Q_out
+    Q_in = tf.reduce_mean(tf.maximum(lst_batch - y_pred, 0))
+    Q_out = tf.reduce_mean(tf.maximum(y_pred - lst_batch, 0))
+
+    # Pérdida de conservación de energía
+    physics_loss = tf.reduce_mean(tf.abs(Q_in - Q_out))
+    
+    # Pérdida basada en datos (RMSE)
+    data_loss = root_mean_squared_error(y_true, y_pred)
+    print("Data Loss (RMSE):", data_loss)
+    print("Physics Loss (Energy Conservation):", physics_loss)
+
+    # Pérdida total combinada
+    return alpha * data_loss + beta * physics_loss
+
