@@ -129,7 +129,7 @@ def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inp
     
     # Split data    
     if stratified:
-        train_index, validation_index, test_index = split_data_stratified(input_data, data_targets, river_encoded)
+        train_index, validation_index, test_index = split_data_stratified(input_data, data_targets, labels)
     else:
         train_index, validation_index, test_index = split_data(input_data, data_targets)
         
@@ -201,7 +201,7 @@ def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inp
     # Save model results
     laabeel = 'label' if conditioned else 'no label'
     var_inputs = '' if inputs == None else ', '.join(inputs)
-    variables = ', '.join([f'lst', var_inputs, laabeel])
+    variables = ', '.join([var_inputs, laabeel,'stratified'])
     details = {'RMSE':mean_results['RMSE'],'Variables':variables,'Input': f'{len(np.unique(labels))} rivers', 'Output': 'wt', \
                'Resolution': W, 'nº samples': len(data_targets), 'Batch size': batch_size, 'Epochs': epochs, 'Date':current_date, \
                'Time':current_time, 'Duration': duration}
@@ -225,8 +225,8 @@ if '__main__':
     for model_name in model_names:
         for batch_size in batch_sizes:
             for epochs in epochs_list:
-                run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inputs=inputs)
+                run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inputs=inputs, stratified = True)
                 if model_name == 'img_wise_CNN':
-                    run_experiment(model_name, batch_size, epochs, W=256, conditioned=True, inputs=inputs)
+                    run_experiment(model_name, batch_size, epochs, W=256, conditioned=True, inputs=inputs, stratified = True)
                 
 
