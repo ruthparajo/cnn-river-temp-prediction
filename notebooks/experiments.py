@@ -242,7 +242,7 @@ def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inp
     variables = ', '.join([var_inputs, laabeel])
     details = {'RMSE':mean_results['RMSE'],'Variables':variables,'Input': f'{len(np.unique(labels))} rivers', 'Output': 'wt', \
                'Resolution': W, 'nº samples': len(data_targets), 'Batch size': batch_size, 'Epochs': epochs, 'Date':current_date, \
-               'Time':current_time, 'Duration': duration, 'Loss': 'Physics-guided'}
+               'Time':current_time, 'Duration': duration, 'Loss': 'Physics-guided' if physics_guided else 'RMSE'}
     
     file_path = f"../results/{model_name}_results.xlsx"
     save_excel(file_path, details, excel = 'Results')
@@ -265,8 +265,8 @@ if '__main__':
     for inputs in inputs_comb:
         for batch_size in batch_sizes:
             for epochs in epochs_list:
-                run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inputs=inputs, stratified = False, physics_guided = True)
-                #if model_name == 'img_wise_CNN':
-                 #   run_experiment(model_name, batch_size, epochs, W=256, conditioned=True, inputs=inputs, stratified = True, physics_guided = True)
+                run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inputs=inputs, stratified = False, physics_guided = False)
+                if model_name == 'img_wise_CNN':
+                    run_experiment(model_name, batch_size, epochs, W=256, conditioned=True, inputs=inputs, stratified = False, physics_guided = False)
                 
 
