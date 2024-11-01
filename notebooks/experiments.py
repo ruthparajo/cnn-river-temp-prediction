@@ -21,7 +21,7 @@ import numpy as np
 source_folder = '../data/external/raster_masks'
 rivers = {}
 source_path = '../data/preprocessed/'
-data_paths = ['lst','wt','masked','slope', 'discharge']#, 'ndvi', 'wt', 'masked','discharge', 'slope']#, 'wt_interpolated']
+data_paths = ['lst','wt','masked','slope', 'discharge', 'ndvi']#, 'ndvi', 'wt', 'masked','discharge', 'slope']#, 'wt_interpolated']
 dir_paths = [os.path.join(source_path,p) for p in data_paths]
 all_dir_paths = {k:[] for k in data_paths}    
 total_data = {}
@@ -57,10 +57,12 @@ for k,v in all_dir_paths.items():
             list_rgb = [False]*len(v)
 
             labels = []
+            
+        data, times = load_data(v,W,list_rgb)
+        if k!='masked':
+            labels = []
             for ki,value in data.items():
                 labels+=[ki.split('/')[-1]]*len(value)
-        
-        data, times = load_data(v,W,list_rgb)
         
         filtered = [arr for arr in data.values() if arr.size > 0]
 
@@ -87,7 +89,7 @@ encoder = OneHotEncoder(sparse_output=False)
 river_encoded = encoder.fit_transform(np.array(labels).reshape(-1, 1))
 data_targets = total_data['wt']
 results = {'MAE':0,'MSE':0,'RMSE':0,'R²':0,'MAPE (%)':0,'MSE sample-wise':0}
-
+print(labels)
 # -------------------------------- Finish loading data --------------------------------
 
 def get_results(test_target, test_prediction, rivers, labels, test_index):
@@ -110,7 +112,7 @@ def get_results(test_target, test_prediction, rivers, labels, test_index):
 
 
 def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inputs=None, stratified=None, physics_guided=None):
-    print(f"Running experiment with model={model_name}, batch_size={batch_size}, epochs={epochs}")
+    print(f"Running experiment with model={model_name}, batch_size={batch_size}, epochs={epochs}, inputs = {inputs}")
     
     # Choose inputs
     inputs_d = [total_data[inp] for inp in inputs]
@@ -128,12 +130,27 @@ def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inp
     input_data = combined_input
 
     
-    # Split data    
-    if stratified:
+    time_split = True
+    if time_split:
+        train_ratio = 0.6
+        val_ratio = 0.2
+        test_ratio = 0.2
+        
+        # Calcular el tamaño de cada conjunto
+        total_images = len(input_data)
+        train_size = int(total_images * train_ratio)
+        val_size = int(total_images * val_ratio)
+        indices = np.arange(total_images)
+        
+        train_index = indices[:train_size]                       # Primeros índices para entrenamiento
+        validation_index = indices[train_size:train_size + val_size]    # Siguientes índices para validación
+        test_index = indices[train_size + val_size:]             # Últimos índices para prueba
+       
+    elif stratified:
         train_index, validation_index, test_index = split_data_stratified(input_data, data_targets, labels)
     else:
         train_index, validation_index, test_index = split_data(input_data, data_targets)
-        
+            
     validation_input = input_data[validation_index, :] / 255.0  # Normalize inputs
     validation_target = data_targets[validation_index, :]
     validation_rivers = river_encoded[validation_index, :]
@@ -143,7 +160,6 @@ def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inp
     train_input = input_data[train_index, :] / 255.0  # Normalize inputs
     train_target = data_targets[train_index, :]
     train_rivers = river_encoded[train_index, :]
-    
     
     if len(train_input.shape) == 3:
         input_shape = train_input.shape[1:]+(1,)
@@ -226,7 +242,7 @@ def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inp
     variables = ', '.join([var_inputs, laabeel])
     details = {'RMSE':mean_results['RMSE'],'Variables':variables,'Input': f'{len(np.unique(labels))} rivers', 'Output': 'wt', \
                'Resolution': W, 'nº samples': len(data_targets), 'Batch size': batch_size, 'Epochs': epochs, 'Date':current_date, \
-               'Time':current_time, 'Duration': duration, 'Loss': 'Physics-guided'}
+               'Time':current_time, 'Duration': duration, 'Loss': 'Physics-guided' if physics_guided else 'RMSE'}
     
     file_path = f"../results/{model_name}_results.xlsx"
     save_excel(file_path, details, excel = 'Results')
@@ -243,12 +259,14 @@ if '__main__':
     epochs_list = [10, 50, 100]
     model_names = ['img_wise_CNN', 'UNet', 'CNN', 'img_2_img']
     inputs = [d for d in data_paths if d not in ['wt', 'masked']]
+    inputs_comb = [[d for d in data_paths if d not in ['wt', 'masked','slope', 'discharge']],[d for d in data_paths if d not in ['wt', 'masked','ndvi']],[d for d in data_paths if d not in ['wt', 'masked']], [d for d in data_paths if d not in ['wt', 'masked','slope', 'discharge','ndvi']]]
+    model_name = 'img_wise_CNN'
 
-    for model_name in model_names:
+    for inputs in inputs_comb:
         for batch_size in batch_sizes:
             for epochs in epochs_list:
-                run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inputs=inputs, stratified = False, physics_guided = True)
-                #if model_name == 'img_wise_CNN':
-                 #   run_experiment(model_name, batch_size, epochs, W=256, conditioned=True, inputs=inputs, stratified = True, physics_guided = True)
+                run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inputs=inputs, stratified = False, physics_guided = False)
+                if model_name == 'img_wise_CNN':
+                    run_experiment(model_name, batch_size, epochs, W=256, conditioned=True, inputs=inputs, stratified = False, physics_guided = False)
                 
 
