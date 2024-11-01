@@ -29,6 +29,7 @@ total_times = {}
 complete_rivers = []
 filter_river = None
 W=256
+time_split = True
 
 # Load rivers
 for subdir, dirs, files in os.walk(source_folder):
@@ -42,7 +43,7 @@ for i,dir_p in enumerate(dir_paths):
     for subdir, dirs,files in os.walk(dir_p):
         if subdir != dir_p and not subdir.endswith('masked') and not subdir.endswith('.ipynb_checkpoints'): 
             all_dir_paths[data_paths[i]].append(subdir)
-        elif subdir.endswith('masked'):
+        elif subdir.endswith('masked') and 'masked' in data_paths:
             all_dir_paths['masked'].append(subdir)
 
 # Load input data
@@ -55,8 +56,6 @@ for k,v in all_dir_paths.items():
             list_rgb = [True]*len(v)
         else:
             list_rgb = [False]*len(v)
-
-            labels = []
             
         data, times = load_data(v,W,list_rgb)
         if k!='masked':
@@ -64,10 +63,17 @@ for k,v in all_dir_paths.items():
             for ki,value in data.items():
                 labels+=[ki.split('/')[-1]]*len(value)
         
-        filtered = [arr for arr in data.values() if arr.size > 0]
-
-        total_data[k] = np.concatenate(filtered, axis=0)
-        total_times[k] = times
+        data_values = [np.array(img) for sublist in list(data.values()) for img in sublist]
+        times_list = [t for sublist in times for t in sublist]
+   
+        if time_split:
+            dates = [datetime.strptime(date, '%Y-%m') for date in times_list]
+            pairs = sorted(zip(dates, data_values, labels), key=lambda x: x[0])
+            sorted_dates, data_values, labels = zip(*pairs)
+            times_list = [date.strftime('%Y-%m') for date in sorted_dates]
+            
+        total_data[k] = np.array(data_values)
+        total_times[k] = times_list
         print(k,':' ,total_data[k].shape)
 
     elif k == 'discharge' or k == 'slope':
@@ -79,9 +85,16 @@ for k,v in all_dir_paths.items():
                 var = resize_image(r, W,W)
                 img_river = labels.count(p.split("/")[-1])
                 var_input = np.tile(var, (img_river, 1, 1))
-                total.append(var_input)
-        
-        total_data[k] = np.concatenate(total, axis=0)
+                if var_input.size !=0:
+                    total.append(var_input)
+        data_values = [np.array(img) for sublist in list(data.values()) for img in sublist]
+        if time_split:
+            dates = [datetime.strptime(date, '%Y-%m') for date in times_list]
+            pairs = sorted(zip(dates, data_values, labels), key=lambda x: x[0])
+            sorted_dates, data_values, labels = zip(*pairs)
+            times_list = [date.strftime('%Y-%m') for date in sorted_dates]
+            
+        total_data[k] = np.array(data_values)
         print(k,':' ,total_data[k].shape)
 
 # Hot encoding
@@ -89,7 +102,7 @@ encoder = OneHotEncoder(sparse_output=False)
 river_encoded = encoder.fit_transform(np.array(labels).reshape(-1, 1))
 data_targets = total_data['wt']
 results = {'MAE':0,'MSE':0,'RMSE':0,'R²':0,'MAPE (%)':0,'MSE sample-wise':0}
-print(labels)
+
 # -------------------------------- Finish loading data --------------------------------
 
 def get_results(test_target, test_prediction, rivers, labels, test_index):
@@ -129,8 +142,6 @@ def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inp
     # The final combined input is stored in input_data
     input_data = combined_input
 
-    
-    time_split = True
     if time_split:
         train_ratio = 0.6
         val_ratio = 0.2
@@ -196,6 +207,9 @@ def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inp
     elif model_name == 'transfer_learning_VGG16':
         train_input = train_input[:, :, :, :3]
         model = build_transfer_model((W, W, 3))
+    elif model_name == "img_wise_CNN_improved":
+        model = build_simplified_cnn_model_improved(input_args)
+        
     
     
     # Train the model
@@ -256,17 +270,19 @@ def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inp
 
 if '__main__':
     batch_sizes = [16, 32]
-    epochs_list = [10, 50, 100]
-    model_names = ['img_wise_CNN', 'UNet', 'CNN', 'img_2_img']
+    epochs_list = [10, 50]
+    model_names = ['img_wise_CNN','img_wise_CNN_improved']# 'UNet', 'CNN', 'img_2_img']
     inputs = [d for d in data_paths if d not in ['wt', 'masked']]
     inputs_comb = [[d for d in data_paths if d not in ['wt', 'masked','slope', 'discharge']],[d for d in data_paths if d not in ['wt', 'masked','ndvi']],[d for d in data_paths if d not in ['wt', 'masked']], [d for d in data_paths if d not in ['wt', 'masked','slope', 'discharge','ndvi']]]
     model_name = 'img_wise_CNN'
-
-    for inputs in inputs_comb:
-        for batch_size in batch_sizes:
-            for epochs in epochs_list:
-                run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inputs=inputs, stratified = False, physics_guided = False)
-                if model_name == 'img_wise_CNN':
-                    run_experiment(model_name, batch_size, epochs, W=256, conditioned=True, inputs=inputs, stratified = False, physics_guided = False)
+    
+    for model_name in model_names:
+        for inputs in inputs_comb:
+            for batch_size in batch_sizes:
+                for epochs in epochs_list:
+                    for ph in [True, False]:
+                        run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inputs=inputs, stratified = False, physics_guided = ph)
+                    if model_name == 'img_wise_CNN':
+                        run_experiment(model_name, batch_size, epochs, W=256, conditioned=True, inputs=inputs, stratified = False, physics_guided = False)
                 
 
