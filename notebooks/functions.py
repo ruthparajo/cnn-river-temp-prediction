@@ -15,15 +15,18 @@ from sklearn.model_selection import train_test_split
 
 
 def load_raster(filepath,rgb = True):
-  with rasterio.open(filepath) as src:
-    if rgb:
-      red = src.read(1)
-      green = src.read(2)
-      blue = src.read(3)
-      rgb = np.dstack((red, green, blue))
-      return rgb, src
-    else:
-      return src.read(1), src
+  try:
+      with rasterio.open(filepath) as src:
+        if rgb:
+          red = src.read(1)
+          green = src.read(2)
+          blue = src.read(3)
+          rgb = np.dstack((red, green, blue))
+          return rgb, src
+        else:
+          return src.read(1), src
+  except rasterio.errors.RasterioIOError:
+    print(f"{filepath} no es pot obrir com a TIFF.")
       
 def resize_image(image, new_width, new_height):
     return resize(image, (new_height, new_width), preserve_range=True)
@@ -52,13 +55,16 @@ def load_data(dir_paths, W=None, rgb=[], show=None):
         imgs_data = []
         for img_file in valid_image_files:
             imagen_path = os.path.join(path, img_file)
-            img_data, meta = load_raster(imagen_path, rgb[i])  # Load raster data
-
-            if W:  # Resize the image if W is provided
-                img_data = resize_image(img_data, W, W)
-
-            imgs_data.append(img_data)
-            times.append(extract_year_month_from_filename(img_file))
+            try:
+                img_data, meta = load_raster(imagen_path, rgb[i])  # Load raster data
+    
+                if W:  # Resize the image if W is provided
+                    img_data = resize_image(img_data, W, W)
+    
+                imgs_data.append(img_data)
+                times.append(extract_year_month_from_filename(img_file))
+            except:
+                pass
             
         data[path] = np.array(imgs_data)
         time_slots.append(times)
@@ -315,7 +321,6 @@ def simple_idw(x, y, z, xi, yi, beta=2):
     `beta` = determines the degree to which the nearer point(s) are preferred over more distant points.
             Typically 1 or 2 (inverse or inverse squared relationship)
     """
-    print('Fent')
 
     dist = distance_matrix(x, y, xi, yi)
 
