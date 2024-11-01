@@ -216,3 +216,34 @@ def conservation_energy_loss_v0(y_true, y_pred, model_input_batch, alpha=0.5, be
     # Pérdida total combinada
     return alpha * data_loss + beta * physics_loss
 
+def build_simplified_cnn_model_improved(input_shape):
+    model = models.Sequential()
+
+    # Capa 1: Convolucional + BatchNormalization + ReLU + Max Pooling + Dropout
+    model.add(layers.Conv2D(16, (3, 3), activation='relu', kernel_regularizer=regularizers.l2(0.0005), input_shape=input_shape))
+    model.add(layers.BatchNormalization())
+    model.add(layers.MaxPooling2D((2, 2)))
+    model.add(layers.Dropout(0.3))
+
+    # Capa 2: Convolucional + BatchNormalization + ReLU + Max Pooling + Dropout
+    model.add(layers.Conv2D(32, (3, 3), activation='relu', kernel_regularizer=regularizers.l2(0.0005)))
+    model.add(layers.BatchNormalization())
+    model.add(layers.MaxPooling2D((2, 2)))
+    model.add(layers.Dropout(0.3))
+
+    # Capa de aplanamiento
+    model.add(layers.Flatten())
+
+    # Capa densa + BatchNormalization + Dropout
+    model.add(layers.Dense(64, activation='relu', kernel_regularizer=regularizers.l2(0.0005)))
+    model.add(layers.BatchNormalization())
+    model.add(layers.Dropout(0.4))
+
+    # Capa de salida con activación lineal (para predicciones de temperatura)
+    model.add(layers.Dense(256 * 256, activation='linear'))
+
+    # Reshape de la salida a la forma (256, 256)
+    model.add(layers.Reshape((256, 256)))
+
+    return model
+
