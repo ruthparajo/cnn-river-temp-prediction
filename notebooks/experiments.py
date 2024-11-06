@@ -21,7 +21,7 @@ import numpy as np
 source_folder = '../data/external/raster_masks'
 rivers = {}
 source_path = '../data/preprocessed/'
-data_paths = ['lst','wt','masked','slope', 'discharge', 'ndvi']#, 'ndvi', 'wt', 'masked','discharge', 'slope']#, 'wt_interpolated']
+data_paths = ['lst','wt_interpolated','masked','slope', 'discharge', 'ndvi','altitude']#, 'ndvi', 'wt', 'masked','discharge', 'slope']#, 'wt_interpolated']
 dir_paths = [os.path.join(source_path,p) for p in data_paths]
 all_dir_paths = {k:[] for k in data_paths}    
 total_data = {}
@@ -40,18 +40,22 @@ for subdir, dirs, files in os.walk(source_folder):
 
 # Load input paths
 for i,dir_p in enumerate(dir_paths):
+    if data_paths[i] != 'discharge' and data_paths[i] != 'slope' and data_paths[i] != 'altitude':
+        imgs_per_river = Counter()
     for subdir, dirs,files in os.walk(dir_p):
         if subdir != dir_p and not subdir.endswith('masked') and not subdir.endswith('.ipynb_checkpoints'): 
             all_dir_paths[data_paths[i]].append(subdir)
         elif subdir.endswith('masked') and 'masked' in data_paths:
             all_dir_paths['masked'].append(subdir)
-
+        elif dir_p.endswith('altitude'):
+            all_dir_paths[data_paths[i]].extend(files)
+            
 # Load input data
 for k,v in all_dir_paths.items():
     if filter_river != None:
         v = [v[i] for i in filter_river]
     
-    if k != 'discharge' and k != 'slope':
+    if k != 'discharge' and k != 'slope' and k != 'altitude':
         if k == 'lst' or k == 'masked':
             list_rgb = [True]*len(v)
         else:
@@ -76,31 +80,33 @@ for k,v in all_dir_paths.items():
         total_times[k] = times_list
         print(k,':' ,total_data[k].shape)
 
-    elif k == 'discharge' or k == 'slope':
-        total = []
-        for p in v:
-            for file in os.listdir(p):
-                file_path = os.path.join(p, file)
-                r,m = load_raster(file_path, False)
-                var = resize_image(r, W,W)
-                img_river = labels.count(p.split("/")[-1])
-                var_input = np.tile(var, (img_river, 1, 1))
-                if var_input.size !=0:
-                    total.append(var_input)
-        data_values = [np.array(img) for sublist in list(data.values()) for img in sublist]
-        if time_split:
-            dates = [datetime.strptime(date, '%Y-%m') for date in times_list]
-            pairs = sorted(zip(dates, data_values, labels), key=lambda x: x[0])
-            sorted_dates, data_values, labels = zip(*pairs)
-            times_list = [date.strftime('%Y-%m') for date in sorted_dates]
-            
-        total_data[k] = np.array(data_values)
-        print(k,':' ,total_data[k].shape)
+
+for k,v in all_dir_paths.items():
+    total = []
+    if k == 'discharge' or k == 'slope' or k == 'altitude':
+        for i,lab in enumerate(labels):
+            for file in v:
+                if lab == file.split('/')[-1] or lab == file.split('.')[0]:
+                    if lab not in imgss.keys():
+                        if k != 'altitude':
+                            file_path = os.path.join(file,os.listdir(file)[0])
+                        else:
+                            file_path = os.path.join('../data/preprocessed/altitude', file)
+                        
+                        r,m = load_raster(file_path, False)
+                        var = resize_image(r, W,W)
+                        imgss[lab] = var
+                    else:
+                        var = imgss[lab]
+                    total.append(var)
+                        
+        total_data[k] = np.array(total)
+        print(k, np.array(total).shape)
 
 # Hot encoding
 encoder = OneHotEncoder(sparse_output=False)
 river_encoded = encoder.fit_transform(np.array(labels).reshape(-1, 1))
-data_targets = total_data['wt']
+data_targets = total_data['wt_interpolated']
 results = {'MAE':0,'MSE':0,'RMSE':0,'R²':0,'MAPE (%)':0,'MSE sample-wise':0}
 
 # -------------------------------- Finish loading data --------------------------------
@@ -272,8 +278,8 @@ if '__main__':
     batch_sizes = [16, 32]
     epochs_list = [10, 50]
     model_names = ['UNet', 'CNN', 'img_2_img']#'img_wise_CNN','img_wise_CNN_improved']
-    inputs = [d for d in data_paths if d not in ['wt', 'masked']]
-    inputs_comb = [[d for d in data_paths if d not in ['wt', 'masked','slope', 'discharge']],[d for d in data_paths if d not in ['wt', 'masked','ndvi']],[d for d in data_paths if d not in ['wt', 'masked']], [d for d in data_paths if d not in ['wt', 'masked','slope', 'discharge','ndvi']]]
+    inputs = [d for d in data_paths if d not in ['wt_interpolated', 'masked']]
+    inputs_comb = [[d for d in data_paths if d not in ['wt_interpolated', 'masked','slope', 'discharge']],[d for d in data_paths if d not in ['wt_interpolated', 'masked','ndvi']],[d for d in data_paths if d not in ['wt_interpolated', 'masked']], [d for d in data_paths if d not in ['wt_interpolated', 'masked','slope', 'discharge','ndvi']]]
     model_name = 'img_wise_CNN'
     
     for model_name in model_names:

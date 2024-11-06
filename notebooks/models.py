@@ -64,6 +64,47 @@ def build_simplified_cnn_model_label(input_shape, num_rivers):
 
     return model
 
+def build_cnn_model_label(input_shape, num_rivers):
+    # Entrada de la imagen (temperatura)
+    image_input = Input(shape=input_shape)
+
+    x = layers.Conv2D(32, (3, 3), activation='relu', input_shape=input_shape)(image_input)
+    x = layers.MaxPooling2D((2, 2))(x)
+
+    # Capa 2: Convolucional + Activación ReLU + Max Pooling
+    x = layers.Conv2D(64, (3, 3), activation='relu')(x)
+    x = layers.MaxPooling2D((2, 2))(x)
+
+    # Capa 3: Convolucional + Activación ReLU + Max Pooling
+    x = layers.Conv2D(128, (3, 3), activation='relu')(x)
+    x = layers.MaxPooling2D((2, 2))(x)
+
+    # Capa 4: Convolucional + Activación ReLU
+    x = layers.Conv2D(128, (3, 3), activation='relu')(x)
+
+    # Aplanamiento de la salida convolucional
+    x = layers.Flatten()(x)
+
+    # Entrada de la etiqueta del río (one-hot encoding)
+    river_input = Input(shape=(num_rivers,))
+
+    # Concatenar la salida de la CNN con la entrada del río
+    x = concatenate([x, river_input])
+
+    # Capa densa después de la concatenación
+    x = layers.Dense(256, activation='relu', kernel_regularizer=regularizers.l2(0.001))(x)
+
+    # Capa de salida con activación lineal (para predicciones de temperatura)
+    output = layers.Dense(256 * 256, activation='linear')(x)
+
+    # Reshape de la salida a la forma (256, 256)
+    output = layers.Reshape((256, 256))(output)
+
+    # Crear el modelo final con dos entradas (imagen + río)
+    model = models.Model(inputs=[image_input, river_input], outputs=output)
+
+    return model
+
 def build_cnn_model(input_shape):
     model = models.Sequential()
 
@@ -247,3 +288,41 @@ def build_simplified_cnn_model_improved(input_shape):
 
     return model
 
+def build_cnn_model_features(input_shape, num_rivers):
+    # Image input (temperature)
+    image_input = Input(shape=input_shape)
+
+    # Convolutional Layer 1 + ReLU Activation + Max Pooling
+    x = layers.Conv2D(16, (3, 3), activation='relu', kernel_regularizer=regularizers.l2(0.001))(image_input)
+    x = layers.MaxPooling2D((2, 2))(x)
+
+    # Convolutional Layer 2 + ReLU Activation + Max Pooling
+    x = layers.Conv2D(32, (3, 3), activation='relu', kernel_regularizer=regularizers.l2(0.001))(x)
+    x = layers.MaxPooling2D((2, 2))(x)
+
+    # Flatten the convolutional output
+    x = layers.Flatten()(x)
+
+    # River label input (one-hot encoding)
+    river_input = Input(shape=(num_rivers,))
+
+    # Month inputs for sine and cosine values
+    month_sin_input = Input(shape=(1,), name='Month_Sin')
+    month_cos_input = Input(shape=(1,), name='Month_Cos')
+
+    # Concatenate the CNN output with the river label and month sine/cosine inputs
+    x = concatenate([x, river_input, month_sin_input, month_cos_input])
+
+    # Dense layer after concatenation
+    x = layers.Dense(64, activation='relu', kernel_regularizer=regularizers.l2(0.001))(x)
+
+    # Output layer with linear activation (for temperature predictions)
+    output = layers.Dense(256 * 256, activation='linear')(x)
+
+    # Reshape the output to (256, 256)
+    output = layers.Reshape((256, 256))(output)
+
+    # Final model with four inputs (image, river label, month sine, and month cosine)
+    model = models.Model(inputs=[image_input, river_input, month_sin_input, month_cos_input], outputs=output)
+
+    return model

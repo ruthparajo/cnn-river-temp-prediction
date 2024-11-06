@@ -313,7 +313,7 @@ def distance_matrix(x0, y0, x1, y1):
     # calculate hypotenuse
     return np.hypot(d0, d1)
 
-def simple_idw(x, y, z, xi, yi, beta=2):
+def simple_idw(x, y, z, xi, yi, beta=2, dist_matrix=None):
     """
     Simple inverse distance weighted (IDW) interpolation
     x`, `y`,`z` = known data arrays containing coordinates and data used for interpolation
@@ -321,17 +321,19 @@ def simple_idw(x, y, z, xi, yi, beta=2):
     `beta` = determines the degree to which the nearer point(s) are preferred over more distant points.
             Typically 1 or 2 (inverse or inverse squared relationship)
     """
+    if dist_matrix is None:
+        dist_matrix = distance_matrix(x, y, xi, yi)
+    
+    # Calculate weights using inverse distance with exponent `beta`
+    weights = dist_matrix ** (-beta)
+    weights /= weights.sum(axis=0) + 1e-12  # Normalizing weights
 
-    dist = distance_matrix(x, y, xi, yi)
+    weights = np.nan_to_num(weights, nan=0.0)
+    z = np.nan_to_num(z, nan=0.0)
 
-    
-    '''weights = 1.0 / (dist + 1e-12) ** beta
-    
-    # Verificar si la suma de pesos es válida
-    sum_weights = weights.sum(axis=0)
-    
-    # Normalizar los pesos
-    weights /= sum_weights + 1e-12'''
+    return np.dot(weights.T, z)
+
+    '''dist = distance_matrix(x, y, xi, yi)
 
     # In IDW, weights are 1 / distance
     # weights = 1.0/(dist+1e-12)**power
@@ -344,7 +346,7 @@ def simple_idw(x, y, z, xi, yi, beta=2):
     z = np.nan_to_num(z, nan=0.0)
 
     # Multiply the weights for each interpolated point by all observed Z-values
-    return np.dot(weights.T, z)
+    return np.dot(weights.T, z)'''
 
 def project_linestrings_to_points(gdf):
     x_coords = []
