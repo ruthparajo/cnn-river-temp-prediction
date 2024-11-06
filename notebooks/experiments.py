@@ -271,18 +271,17 @@ def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inp
 if '__main__':
     batch_sizes = [16, 32]
     epochs_list = [10, 50]
-    model_names = ['img_wise_CNN','img_wise_CNN_improved']# 'UNet', 'CNN', 'img_2_img']
+    model_names = ['UNet', 'CNN', 'img_2_img']#'img_wise_CNN','img_wise_CNN_improved']
     inputs = [d for d in data_paths if d not in ['wt', 'masked']]
     inputs_comb = [[d for d in data_paths if d not in ['wt', 'masked','slope', 'discharge']],[d for d in data_paths if d not in ['wt', 'masked','ndvi']],[d for d in data_paths if d not in ['wt', 'masked']], [d for d in data_paths if d not in ['wt', 'masked','slope', 'discharge','ndvi']]]
     model_name = 'img_wise_CNN'
     
     for model_name in model_names:
-        for inputs in inputs_comb:
-            for batch_size in batch_sizes:
-                for epochs in epochs_list:
-                    for ph in [True, False]:
-                        run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inputs=inputs, stratified = False, physics_guided = ph)
-                    if model_name == 'img_wise_CNN':
-                        run_experiment(model_name, batch_size, epochs, W=256, conditioned=True, inputs=inputs, stratified = False, physics_guided = False)
+        for batch_size in batch_sizes:
+            for epochs in epochs_list:
+                #for ph in [True, False]:
+                run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inputs=inputs, stratified = False, physics_guided = False)
+                if model_name == 'img_wise_CNN':
+                    run_experiment(model_name, batch_size, epochs, W=256, conditioned=True, inputs=inputs, stratified = False, physics_guided = False)
                 
 
