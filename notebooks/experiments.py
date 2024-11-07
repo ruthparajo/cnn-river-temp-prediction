@@ -84,6 +84,7 @@ for k,v in all_dir_paths.items():
 for k,v in all_dir_paths.items():
     total = []
     if k == 'discharge' or k == 'slope' or k == 'altitude':
+        imgss = {}
         for i,lab in enumerate(labels):
             for file in v:
                 if lab == file.split('/')[-1] or lab == file.split('.')[0]:
@@ -277,8 +278,8 @@ def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inp
 if '__main__':
     batch_sizes = [16, 32]
     epochs_list = [10, 50]
-    model_names = ['UNet', 'CNN', 'img_2_img']#'img_wise_CNN','img_wise_CNN_improved']
-    inputs = [d for d in data_paths if d not in ['wt_interpolated', 'masked']]
+    model_names = ['UNet', 'CNN', 'img_2_img','img_wise_CNN','img_wise_CNN_improved']
+    inputs = [d for d in data_paths if d not in ['wt_interpolated', 'masked','slope', 'discharge', 'altitude']]
     inputs_comb = [[d for d in data_paths if d not in ['wt_interpolated', 'masked','slope', 'discharge']],[d for d in data_paths if d not in ['wt_interpolated', 'masked','ndvi']],[d for d in data_paths if d not in ['wt_interpolated', 'masked']], [d for d in data_paths if d not in ['wt_interpolated', 'masked','slope', 'discharge','ndvi']]]
     model_name = 'img_wise_CNN'
     
