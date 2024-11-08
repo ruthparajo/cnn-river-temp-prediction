@@ -14,6 +14,7 @@ import gc
 import time
 from datetime import datetime
 import numpy as np
+import argparse
 
 
 # -------------------------------- Load data --------------------------------
@@ -109,6 +110,7 @@ encoder = OneHotEncoder(sparse_output=False)
 river_encoded = encoder.fit_transform(np.array(labels).reshape(-1, 1))
 data_targets = total_data['wt_interpolated']
 results = {'MAE':0,'MSE':0,'RMSE':0,'R²':0,'MAPE (%)':0,'MSE sample-wise':0}
+str_months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
 # -------------------------------- Finish loading data --------------------------------
 
@@ -130,6 +132,38 @@ def get_results(test_target, test_prediction, rivers, labels, test_index):
         mean_results[key] = np.mean(mean_results[key])
     return mean_results
 
+def get_months_vectorized(times):
+    month_cosine_dict = {}
+    month_sinus_dict = {}
+    
+    # Fill the dictionary with cosine values for each month
+    for month in range(1, 13):
+        # Scale the month from 0 to 1 (January as 0, December as 11/12)
+        month_scaled = (month - 1) / 12
+        # Convert the scaled month to radians and apply the cosine function
+        month_cosine = np.cos(month_scaled * 2 * np.pi)
+        month_sinus = np.sin(month_scaled * 2 * np.pi)
+        # Store it in the dictionary
+        month_cosine_dict[month] = month_cosine
+        month_sinus_dict[month] = month_sinus
+       
+    
+    times_dt = pd.to_datetime(times)
+    cosine_months = []
+    sine_months = []
+    for time_dt in times_dt:
+        m = time_dt.month
+        cos = month_cosine_dict[m]
+        sin = month_sinus_dict[m]
+        cosine_months.append(cos)
+        sine_months.append(sin)
+        
+    cosine_months = np.array(cosine_months)
+    sine_months = np.array(sine_months)
+    return cosine_months, sine_months
+    
+
+
 
 def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inputs=None, stratified=None, physics_guided=None):
     print(f"Running experiment with model={model_name}, batch_size={batch_size}, epochs={epochs}, inputs = {inputs}")
@@ -148,6 +182,8 @@ def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inp
     combined_input = np.concatenate(expanded_images, axis=-1)
     # The final combined input is stored in input_data
     input_data = combined_input
+    
+    cosine_months, sine_months = get_months_vectorized(total_times['lst'])
 
     if time_split:
         train_ratio = 0.6
@@ -179,6 +215,14 @@ def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inp
     train_target = data_targets[train_index, :]
     train_rivers = river_encoded[train_index, :]
     
+    train_cos_months = cosine_months[train_index] 
+    train_sin_months = sine_months[train_index]
+    val_cos_months = cosine_months[validation_index]
+    val_sin_months = sine_months[validation_index]
+    test_cos_months = cosine_months[test_index]
+    test_sin_months = sine_months[test_index]
+
+    
     if len(train_input.shape) == 3:
         input_shape = train_input.shape[1:]+(1,)
     else:
@@ -188,9 +232,9 @@ def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inp
     # Adapt input to condition
     if conditioned:
         input_args = (input_shape, river_encoded.shape[1])
-        model_input = [train_input, train_rivers]
-        val_model_input = [validation_input, validation_rivers]
-        test_model_input = [test_input, test_rivers]
+        model_input = [train_input, train_rivers, train_cos_months, train_sin_months]
+        val_model_input = [validation_input, validation_rivers, val_cos_months, val_sin_months]
+        test_model_input = [test_input, test_rivers,  test_cos_months, test_sin_months]
     else:
         input_args = input_shape
         model_input = train_input
@@ -274,7 +318,41 @@ def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inp
     
     print(f"Experiment {model_name} with batch_size={batch_size} and epochs={epochs} completed.\n")
 
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Script to run experiments with deep learning models.")
 
+    # Define command-line arguments
+    parser.add_argument('--batch_sizes', nargs='+', type=int, default=[16, 32],
+                        help="List of batch sizes for training the model. Example: --batch_sizes 16 32")
+    parser.add_argument('--epochs_list', nargs='+', type=int, default=[10, 50, 100],
+                        help="List of epochs for training the model. Example: --epochs_list 10 50 100")
+    parser.add_argument('--model_names', nargs='+', type=str, default=['img_wise_CNN', 'UNet', 'CNN', 'img_2_img'],
+                        help="List of model names. Example: --model_names img_wise_CNN UNet CNN img_2_img")
+    parser.add_argument('--inputs', nargs='+', type=str, required=True,
+                        help="List of inputs to include . Example: --inputs lst ndvi")
+
+    # Parse arguments
+    args = parser.parse_args()
+
+    # Extract argument values
+    batch_sizes = args.batch_sizes
+    epochs_list = args.epochs_list
+    model_names = args.model_names
+    inputs = args.inputs
+
+    # Filter inputs as needed
+    #inputs = [d for d in inputs if d not in ['wt', 'masked']]
+
+    # Run experiments with parameter combinations
+    for model_name in model_names:
+        for batch_size in batch_sizes:
+            for epochs in epochs_list:
+                run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inputs=inputs, stratified=False, physics_guided=True)
+                # Additional condition for 'img_wise_CNN'
+                if model_name == 'img_wise_CNN':
+                    run_experiment(model_name, batch_size, epochs, W=256, conditioned=True, inputs=inputs, stratified=False, physics_guided=True)
+
+'''
 if '__main__':
     batch_sizes = [16, 32]
     epochs_list = [10, 50]
@@ -289,6 +367,6 @@ if '__main__':
                 #for ph in [True, False]:
                 run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inputs=inputs, stratified = False, physics_guided = False)
                 if model_name == 'img_wise_CNN':
-                    run_experiment(model_name, batch_size, epochs, W=256, conditioned=True, inputs=inputs, stratified = False, physics_guided = False)
+                    run_experiment(model_name, batch_size, epochs, W=256, conditioned=True, inputs=inputs, stratified = False, physics_guided = False)'''
                 
 
