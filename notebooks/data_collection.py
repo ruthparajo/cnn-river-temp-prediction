@@ -9,9 +9,14 @@ from rasterio.features import geometry_mask, rasterize
 from shapely.geometry import LineString, box, Point
 
 config = SHConfig()
-config.instance_id = '540fb133-7380-4f14-b661-d0bd70600af6'
-config.sh_client_id = '9eb482a2-8adc-4d00-a9b9-2ba93fbb4a70'
-config.sh_client_secret =  'KlTky6sua1whgt7ceQ2imzJUgxrqFaDV'
+#config.instance_id = '540fb133-7380-4f14-b661-d0bd70600af6'
+#config.sh_client_id = '9eb482a2-8adc-4d00-a9b9-2ba93fbb4a70'
+#config.sh_client_secret =  'KlTky6sua1whgt7ceQ2imzJUgxrqFaDV'
+
+config.instance_id = '186865be-334c-4a79-9035-75e69a871c01'
+config.sh_client_id = '9d5fe07a-4d4d-4ceb-bef8-25411cd0349e'
+config.sh_client_secret =  'YvYHw9VOktdPdRETOVMGJAcYg6USMjE1'
+
 
 def first_day(month, year):
     return datetime.date(year, month, 1)
