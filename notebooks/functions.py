@@ -348,7 +348,7 @@ def simple_idw(x, y, z, xi, yi, beta=2, dist_matrix=None):
     # Multiply the weights for each interpolated point by all observed Z-values
     return np.dot(weights.T, z)'''
 
-def project_linestrings_to_points(gdf):
+def project_linestrings_to_points(gdf,show=None):
     x_coords = []
     y_coords = []
     z_coords = []
@@ -372,22 +372,22 @@ def project_linestrings_to_points(gdf):
                     if len(coord) == 3:
                         z_coords.append(coord[2])
 
-
-    # Plot the points on a 2D grid
-    plt.figure(figsize=(10, 10))
-    plt.scatter(x_coords, y_coords, color='blue', s=10, label='Coordinates')
-
-    # Customize the plot
-    plt.title('Projected Coordinates (Points) in EPSG:2056', fontsize=15)
-    plt.xlabel('Easting (meters)', fontsize=12)
-    plt.ylabel('Northing (meters)', fontsize=12)
-
-    # Add gridlines
-    plt.grid(True)
-
-    # Show the plot
-    plt.legend()
-    plt.show()
+    if show:
+        # Plot the points on a 2D grid
+        plt.figure(figsize=(10, 10))
+        plt.scatter(x_coords, y_coords, color='blue', s=10, label='Coordinates')
+    
+        # Customize the plot
+        plt.title('Projected Coordinates (Points) in EPSG:2056', fontsize=15)
+        plt.xlabel('Easting (meters)', fontsize=12)
+        plt.ylabel('Northing (meters)', fontsize=12)
+    
+        # Add gridlines
+        plt.grid(True)
+    
+        # Show the plot
+        plt.legend()
+        plt.show()
     return x_coords, y_coords, z_coords
 
 def split_data_stratified(inputs, data_targets, labels):

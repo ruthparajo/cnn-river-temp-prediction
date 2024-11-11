@@ -87,7 +87,12 @@ def adjust_size(size, max_size=2500):
 
 def get_data(shp, evalscript, time_intervals, data_type, folder):
     coords_wgs84 = list(shp.total_bounds)#[lon_min, lat_min, lon_max, lat_max]
-    resolution = 30
+    if data_type == 'lst':  # Assuming 'lst' uses thermal bands B10 or B11
+        resolution = 100  # Set to 100 meters for thermal bands
+    else:
+        resolution = 30  # Default to 30 meters for other bands
+
+    #resolution = 30
     bbox = BBox(bbox=coords_wgs84, crs=CRS.WGS84)
     # extract the size based on bbx and the resolution
     size = bbox_to_dimensions(bbox, resolution=resolution)

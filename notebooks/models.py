@@ -4,7 +4,39 @@ from tensorflow.keras.layers import concatenate
 import numpy as np
 
 
-def build_simplified_cnn_model(input_shape):
+from tensorflow.keras import layers, models, regularizers
+
+def build_cnn_baseline(input_shape):
+    model = models.Sequential()
+
+    # Capa 1: Convolucional + Batch Normalization + ReLU + Max Pooling
+    model.add(layers.Conv2D(16, (3, 3), activation='relu', kernel_regularizer=regularizers.l2(0.001), input_shape=input_shape))
+    model.add(layers.BatchNormalization())
+    model.add(layers.MaxPooling2D((2, 2)))
+
+    # Capa 2: Convolucional + Batch Normalization + ReLU + Max Pooling
+    model.add(layers.Conv2D(32, (3, 3), activation='relu', kernel_regularizer=regularizers.l2(0.001)))
+    model.add(layers.BatchNormalization())
+    model.add(layers.MaxPooling2D((2, 2)))
+
+    # Capa 3: Convolucional + Batch Normalization + ReLU + Max Pooling
+    model.add(layers.Conv2D(64, (3, 3), activation='relu', kernel_regularizer=regularizers.l2(0.001)))
+    model.add(layers.BatchNormalization())
+    model.add(layers.MaxPooling2D((2, 2)))
+
+    # Global Average Pooling para reducir las dimensiones
+    model.add(layers.GlobalAveragePooling2D())
+
+    # Capas densas con Dropout
+    model.add(layers.Dense(64, activation='relu', kernel_regularizer=regularizers.l2(0.001)))
+    model.add(layers.Dropout(0.3))  # Regularización para evitar sobreajuste
+
+    # Capa de salida con una sola neurona para la predicción escalar
+    model.add(layers.Dense(1, activation='linear'))
+
+    return model
+'''
+def build_cnn_baseline(input_shape):
     model = models.Sequential()
 
     # Capa 1: Convolucional + Activación ReLU + Max Pooling
@@ -21,13 +53,9 @@ def build_simplified_cnn_model(input_shape):
     # Capa densa
     model.add(layers.Dense(64, activation='relu',kernel_regularizer=regularizers.l2(0.001)))
 
-    # Capa de salida con activación lineal (para predicciones de temperatura)
-    model.add(layers.Dense(256 * 256, activation='linear'))
-
-    # Reshape de la salida a la forma (256, 256)
-    model.add(layers.Reshape((256, 256)))
-
-    return model
+    model.add(layers.Dense(1, activation='linear'))
+    
+    return model'''
 
 def build_simplified_cnn_model_label(input_shape, num_rivers):
     # Entrada de la imagen (temperatura)

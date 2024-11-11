@@ -246,9 +246,9 @@ def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inp
     start_time = time.time()
     if model_name == "img_wise_CNN":
         if conditioned:
-            model = build_simplified_cnn_model_label(input_args[0], input_args[1])
+            model = build_cnn_baseline(input_args[0], input_args[1])
         else:
-            model = build_simplified_cnn_model(input_args)
+            model = build_cnn_baseline(input_args)
     elif model_name == 'CNN':
         model = build_cnn_model(input_args)
     elif model_name == 'img_2_img':
