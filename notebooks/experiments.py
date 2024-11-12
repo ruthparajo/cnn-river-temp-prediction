@@ -15,9 +15,12 @@ import time
 from datetime import datetime
 import numpy as np
 import argparse
+<<<<<<< HEAD
 from collections import Counter
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
+=======
+>>>>>>> 960272c1c45441c137e544a2b65b434a1706174a
 
 
 # -------------------------------- Load data --------------------------------
@@ -25,7 +28,11 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 source_folder = '../data/external/raster_masks'
 rivers = {}
 source_path = '../data/preprocessed/'
+<<<<<<< HEAD
 data_paths = ['lst','slope', 'discharge', 'ndvi','altitude']#, 'ndvi', 'wt', 'masked','discharge', 'slope']#, 'wt_interpolated']
+=======
+data_paths = ['lst','wt_interpolated','masked','slope', 'discharge', 'ndvi','altitude']#, 'ndvi', 'wt', 'masked','discharge', 'slope']#, 'wt_interpolated']
+>>>>>>> 960272c1c45441c137e544a2b65b434a1706174a
 dir_paths = [os.path.join(source_path,p) for p in data_paths]
 all_dir_paths = {k:[] for k in data_paths}    
 total_data = {}
@@ -33,7 +40,11 @@ total_times = {}
 complete_rivers = []
 filter_river = None
 W=256
+<<<<<<< HEAD
 time_split = False
+=======
+time_split = True
+>>>>>>> 960272c1c45441c137e544a2b65b434a1706174a
 
 # Load rivers
 for subdir, dirs, files in os.walk(source_folder):
@@ -100,7 +111,10 @@ for k,v in all_dir_paths.items():
                         
                         r,m = load_raster(file_path, False)
                         var = resize_image(r, W,W)
+<<<<<<< HEAD
                         var = np.where(np.isnan(var), 0.0, var)
+=======
+>>>>>>> 960272c1c45441c137e544a2b65b434a1706174a
                         imgss[lab] = var
                     else:
                         var = imgss[lab]
@@ -109,6 +123,7 @@ for k,v in all_dir_paths.items():
         total_data[k] = np.array(total)
         print(k, np.array(total).shape)
 
+<<<<<<< HEAD
 # Load cos and sin variables
 str_months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
@@ -124,6 +139,15 @@ for cell, date in zip(labels,times_ordered):
 data_targets = np.array(wt_temp)
 
 
+=======
+# Hot encoding
+encoder = OneHotEncoder(sparse_output=False)
+river_encoded = encoder.fit_transform(np.array(labels).reshape(-1, 1))
+data_targets = total_data['wt_interpolated']
+results = {'MAE':0,'MSE':0,'RMSE':0,'R²':0,'MAPE (%)':0,'MSE sample-wise':0}
+str_months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+>>>>>>> 960272c1c45441c137e544a2b65b434a1706174a
 # -------------------------------- Finish loading data --------------------------------
 
 def get_results(test_target, test_prediction, rivers, labels, test_index):
@@ -147,7 +171,11 @@ def get_results(test_target, test_prediction, rivers, labels, test_index):
 def get_months_vectorized(times):
     month_cosine_dict = {}
     month_sinus_dict = {}
+<<<<<<< HEAD
     cos_to_month = {}
+=======
+    
+>>>>>>> 960272c1c45441c137e544a2b65b434a1706174a
     # Fill the dictionary with cosine values for each month
     for month in range(1, 13):
         # Scale the month from 0 to 1 (January as 0, December as 11/12)
@@ -158,7 +186,10 @@ def get_months_vectorized(times):
         # Store it in the dictionary
         month_cosine_dict[month] = month_cosine
         month_sinus_dict[month] = month_sinus
+<<<<<<< HEAD
         cos_to_month[month_cosine]= month
+=======
+>>>>>>> 960272c1c45441c137e544a2b65b434a1706174a
        
     
     times_dt = pd.to_datetime(times)
@@ -173,12 +204,21 @@ def get_months_vectorized(times):
         
     cosine_months = np.array(cosine_months)
     sine_months = np.array(sine_months)
+<<<<<<< HEAD
     
     return cosine_months, sine_months, cos_to_month
     
 
 
 def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inputs=None, stratified=None, physics_guided=None, time_split=None):
+=======
+    return cosine_months, sine_months
+    
+
+
+
+def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inputs=None, stratified=None, physics_guided=None):
+>>>>>>> 960272c1c45441c137e544a2b65b434a1706174a
     print(f"Running experiment with model={model_name}, batch_size={batch_size}, epochs={epochs}, inputs = {inputs}")
     
     # Choose inputs
@@ -196,8 +236,12 @@ def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inp
     # The final combined input is stored in input_data
     input_data = combined_input
     
+<<<<<<< HEAD
     cosine_months, sine_months, cos_to_month = get_months_vectorized(total_times['lst'])
     additional_inputs = np.column_stack((cosine_months, sine_months))
+=======
+    cosine_months, sine_months = get_months_vectorized(total_times['lst'])
+>>>>>>> 960272c1c45441c137e544a2b65b434a1706174a
 
     if time_split:
         train_ratio = 0.6
@@ -220,6 +264,7 @@ def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inp
         train_index, validation_index, test_index = split_data(input_data, data_targets)
             
     validation_input = input_data[validation_index, :] / 255.0  # Normalize inputs
+<<<<<<< HEAD
     validation_target = data_targets[validation_index]
     test_input = input_data[test_index, :] / 255.0  # Normalize inputs
     test_target = data_targets[test_index]
@@ -229,6 +274,23 @@ def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inp
     additional_inputs_train = additional_inputs[train_index, :]
     additional_inputs_validation = additional_inputs[validation_index, :]
     additional_inputs_test = additional_inputs[test_index, :]
+=======
+    validation_target = data_targets[validation_index, :]
+    validation_rivers = river_encoded[validation_index, :]
+    test_input = input_data[test_index, :] / 255.0  # Normalize inputs
+    test_target = data_targets[test_index, :]
+    test_rivers = river_encoded[test_index, :]
+    train_input = input_data[train_index, :] / 255.0  # Normalize inputs
+    train_target = data_targets[train_index, :]
+    train_rivers = river_encoded[train_index, :]
+    
+    train_cos_months = cosine_months[train_index] 
+    train_sin_months = sine_months[train_index]
+    val_cos_months = cosine_months[validation_index]
+    val_sin_months = sine_months[validation_index]
+    test_cos_months = cosine_months[test_index]
+    test_sin_months = sine_months[test_index]
+>>>>>>> 960272c1c45441c137e544a2b65b434a1706174a
 
     
     if len(train_input.shape) == 3:
@@ -239,10 +301,17 @@ def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inp
     
     # Adapt input to condition
     if conditioned:
+<<<<<<< HEAD
         input_args = (input_shape, additional_inputs.shape[1])
         model_input = [train_input, additional_inputs_train]
         val_model_input = [validation_input, additional_inputs_validation]
         test_model_input = [test_input, additional_inputs_test]
+=======
+        input_args = (input_shape, river_encoded.shape[1])
+        model_input = [train_input, train_rivers, train_cos_months, train_sin_months]
+        val_model_input = [validation_input, validation_rivers, val_cos_months, val_sin_months]
+        test_model_input = [test_input, test_rivers,  test_cos_months, test_sin_months]
+>>>>>>> 960272c1c45441c137e544a2b65b434a1706174a
     else:
         input_args = input_shape
         model_input = train_input
@@ -252,11 +321,19 @@ def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inp
     
     # Start model
     start_time = time.time()
+<<<<<<< HEAD
     if model_name == "baseline_CNN":
         if conditioned:
             model = build_cnn_model_features(input_args[0], input_args[1])
         else:
             model = build_cnn_baseline(input_args)
+=======
+    if model_name == "img_wise_CNN":
+        if conditioned:
+            model = build_simplified_cnn_model_label(input_args[0], input_args[1])
+        else:
+            model = build_simplified_cnn_model(input_args)
+>>>>>>> 960272c1c45441c137e544a2b65b434a1706174a
     elif model_name == 'CNN':
         model = build_cnn_model(input_args)
     elif model_name == 'img_2_img':
@@ -268,6 +345,7 @@ def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inp
         model = build_transfer_model((W, W, 3))
     elif model_name == "img_wise_CNN_improved":
         model = build_simplified_cnn_model_improved(input_args)
+<<<<<<< HEAD
 
     
     # Create batch dataset
@@ -362,12 +440,49 @@ def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inp
     
     print('\nComputing result metrics...')
     
+=======
+        
+    
+    
+    # Train the model
+    if not physics_guided:
+        model.compile(optimizer='adam', loss='mean_squared_error', metrics=['mae'])
+        history = model.fit(model_input, train_target, batch_size=batch_size, epochs=epochs, validation_data=(val_model_input, validation_target))
+    else:
+        dataset = tf.data.Dataset.from_tensor_slices((*model_input, train_target) if isinstance(model_input, tuple) else (model_input, train_target))
+
+        dataset = dataset.batch(batch_size)
+        optimizer = tf.keras.optimizers.Adam()
+        for epoch in range(epochs):
+            print(f"Epoch {epoch + 1}/{epochs}")
+            for batch in dataset:
+                # Handle batch based on whether model_input is a tuple or a single dataset
+                if isinstance(model_input, tuple):
+                    model_input_batch = batch[:-1]  # All except the last element (target_batch)
+                    target_batch = batch[-1]        # Last element is target_batch
+                else:
+                    model_input_batch, target_batch = batch  # Direct unpacking for single dataset
+
+                with tf.GradientTape() as tape:
+                    y_pred = model(*model_input_batch, training=True) if isinstance(model_input_batch, tuple) else model(model_input_batch, training=True)
+                    loss = conservation_energy_loss(target_batch, y_pred, model_input_batch, alpha=0.5, beta=0.5)
+                gradients = tape.gradient(loss, model.trainable_variables)
+                optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+    
+    
+    # Evaluate results
+    #validation_prediction = model.predict(val_model_input)
+    test_prediction = model.predict(test_model_input)
+    mean_results = get_results(test_target, test_prediction, rivers, labels, test_index)
+
+>>>>>>> 960272c1c45441c137e544a2b65b434a1706174a
     # Get experiment data
     end_time = time.time()
     duration = round(end_time - start_time, 2)
     current_date = datetime.now().strftime("%Y-%m-%d")
     current_time = datetime.now().strftime("%H:%M:%S")
     
+<<<<<<< HEAD
     # Save model results
     laabeel = 'label, month' if conditioned else 'no label'
     var_inputs = '' if inputs == None else ', '.join(inputs)
@@ -375,15 +490,34 @@ def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inp
     details = {'Experiment':num,'RMSE':rmse_test,'Variables':variables,'Input': f'{len(np.unique(labels))} rivers', 'Output': 'wt', \
                'Resolution': W, 'nº samples': len(data_targets), 'Batch size': batch_size, 'Epochs': epochs, 'Date':current_date, \
                'Time':current_time, 'Duration': duration, 'Loss':  'Physics-guided' if physics_guided else 'RMSE'}
+=======
+    
+    # Save model results
+    laabeel = 'label' if conditioned else 'no label'
+    var_inputs = '' if inputs == None else ', '.join(inputs)
+    variables = ', '.join([var_inputs, laabeel])
+    details = {'RMSE':mean_results['RMSE'],'Variables':variables,'Input': f'{len(np.unique(labels))} rivers', 'Output': 'wt', \
+               'Resolution': W, 'nº samples': len(data_targets), 'Batch size': batch_size, 'Epochs': epochs, 'Date':current_date, \
+               'Time':current_time, 'Duration': duration, 'Loss': 'Physics-guided' if physics_guided else 'RMSE'}
+>>>>>>> 960272c1c45441c137e544a2b65b434a1706174a
     
     file_path = f"../results/{model_name}_results.xlsx"
     save_excel(file_path, details, excel = 'Results')
     
+<<<<<<< HEAD
     print('RMSE:',rmse_test,'\n')
     print(f"Experiment {model_name} with batch_size={batch_size} and epochs={epochs} completed.\n")
 
 
 
+=======
+    mean_results['Model'] = model_name
+    file_path = f"../results/all_results.xlsx"
+    save_excel(file_path, mean_results, excel = 'Results')
+    
+    print(f"Experiment {model_name} with batch_size={batch_size} and epochs={epochs} completed.\n")
+
+>>>>>>> 960272c1c45441c137e544a2b65b434a1706174a
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Script to run experiments with deep learning models.")
 
@@ -393,10 +527,17 @@ if __name__ == '__main__':
     parser.add_argument('--epochs_list', nargs='+', type=int, default=[10, 50, 100],
                         help="List of epochs for training the model. Example: --epochs_list 10 50 100")
     parser.add_argument('--model_names', nargs='+', type=str, default=['img_wise_CNN', 'UNet', 'CNN', 'img_2_img'],
+<<<<<<< HEAD
                         help="List of model names. Example: --model_names baseline_CNN UNet CNN img_2_img")
     parser.add_argument('--inputs', nargs='+', type=str, required=True,
                         help="List of inputs to include . Example: --inputs lst ndvi")
     
+=======
+                        help="List of model names. Example: --model_names img_wise_CNN UNet CNN img_2_img")
+    parser.add_argument('--inputs', nargs='+', type=str, required=True,
+                        help="List of inputs to include . Example: --inputs lst ndvi")
+
+>>>>>>> 960272c1c45441c137e544a2b65b434a1706174a
     # Parse arguments
     args = parser.parse_args()
 
@@ -405,12 +546,42 @@ if __name__ == '__main__':
     epochs_list = args.epochs_list
     model_names = args.model_names
     inputs = args.inputs
+<<<<<<< HEAD
     
+=======
+
+    # Filter inputs as needed
+    #inputs = [d for d in inputs if d not in ['wt', 'masked']]
+>>>>>>> 960272c1c45441c137e544a2b65b434a1706174a
 
     # Run experiments with parameter combinations
     for model_name in model_names:
         for batch_size in batch_sizes:
             for epochs in epochs_list:
+<<<<<<< HEAD
                 run_experiment(model_name, batch_size, epochs, W=256, conditioned=True, inputs=inputs, stratified=False, physics_guided=False, time_split = time_split)
+=======
+                run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inputs=inputs, stratified=False, physics_guided=True)
+                # Additional condition for 'img_wise_CNN'
+                if model_name == 'img_wise_CNN':
+                    run_experiment(model_name, batch_size, epochs, W=256, conditioned=True, inputs=inputs, stratified=False, physics_guided=True)
+
+'''
+if '__main__':
+    batch_sizes = [16, 32]
+    epochs_list = [10, 50]
+    model_names = ['UNet', 'CNN', 'img_2_img','img_wise_CNN','img_wise_CNN_improved']
+    inputs = [d for d in data_paths if d not in ['wt_interpolated', 'masked','slope', 'discharge', 'altitude']]
+    inputs_comb = [[d for d in data_paths if d not in ['wt_interpolated', 'masked','slope', 'discharge']],[d for d in data_paths if d not in ['wt_interpolated', 'masked','ndvi']],[d for d in data_paths if d not in ['wt_interpolated', 'masked']], [d for d in data_paths if d not in ['wt_interpolated', 'masked','slope', 'discharge','ndvi']]]
+    model_name = 'img_wise_CNN'
+    
+    for model_name in model_names:
+        for batch_size in batch_sizes:
+            for epochs in epochs_list:
+                #for ph in [True, False]:
+                run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inputs=inputs, stratified = False, physics_guided = False)
+                if model_name == 'img_wise_CNN':
+                    run_experiment(model_name, batch_size, epochs, W=256, conditioned=True, inputs=inputs, stratified = False, physics_guided = False)'''
+>>>>>>> 960272c1c45441c137e544a2b65b434a1706174a
                 
 

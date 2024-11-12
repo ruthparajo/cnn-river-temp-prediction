@@ -317,12 +317,21 @@ def simple_idw(x, y, z, xi, yi, beta=2, dist_matrix=None):
     # Calculate weights using inverse distance with exponent `beta`
     weights = dist_matrix ** (-beta)
     weights /= weights.sum(axis=0) + 1e-12  # Normalizing weights
+<<<<<<< HEAD
 
     weights = np.nan_to_num(weights, nan=0.0)
     z = np.nan_to_num(z, nan=0.0)
 
     return np.dot(weights.T, z)
 
+=======
+
+    weights = np.nan_to_num(weights, nan=0.0)
+    z = np.nan_to_num(z, nan=0.0)
+
+    return np.dot(weights.T, z)
+
+>>>>>>> 960272c1c45441c137e544a2b65b434a1706174a
     '''dist = distance_matrix(x, y, xi, yi)
 
     # In IDW, weights are 1 / distance
@@ -395,4 +404,39 @@ def split_data_stratified(inputs, data_targets, labels):
     val_indices = np.where(np.isin(labels, val_label_idx))[0]
     test_indices = np.where(np.isin(labels, test_label_idx))[0]
 
+<<<<<<< HEAD
+=======
+    # Plot the points on a 2D grid
+    plt.figure(figsize=(10, 10))
+    plt.scatter(x_coords, y_coords, color='blue', s=10, label='Coordinates')
+
+    # Customize the plot
+    plt.title('Projected Coordinates (Points) in EPSG:2056', fontsize=15)
+    plt.xlabel('Easting (meters)', fontsize=12)
+    plt.ylabel('Northing (meters)', fontsize=12)
+
+    # Add gridlines
+    plt.grid(True)
+
+    # Show the plot
+    plt.legend()
+    plt.show()
+    return x_coords, y_coords, z_coords
+
+def split_data_stratified(inputs, data_targets, labels):
+    # 1. Obtener las etiquetas únicas
+    unique_labels, label_indices = np.unique(labels, return_inverse=True)
+    
+    # 2. Hacer una división estratificada en función de las etiquetas únicas
+    train_label_idx, temp_label_idx = train_test_split(unique_labels, test_size=0.4, random_state=42)
+    
+    # Dividir el conjunto temporal (val y test)
+    val_label_idx, test_label_idx = train_test_split(temp_label_idx, test_size=0.5, random_state=42)
+    
+    # 3. Crear máscaras booleanas en base a las etiquetas
+    train_indices = np.where(np.isin(labels, train_label_idx))[0]
+    val_indices = np.where(np.isin(labels, val_label_idx))[0]
+    test_indices = np.where(np.isin(labels, test_label_idx))[0]
+
+>>>>>>> 960272c1c45441c137e544a2b65b434a1706174a
     return train_indices, val_indices, test_indices
