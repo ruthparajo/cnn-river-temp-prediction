@@ -316,9 +316,50 @@ def build_simplified_cnn_model_improved(input_shape):
 
     return model
 
-def build_cnn_model_features(input_shape, num_rivers):
+
+def build_cnn_model_features(input_shape, additional_inputs_shape):
     # Image input (temperature)
-    image_input = Input(shape=input_shape)
+    image_input = Input(shape=input_shape, name="Image_Input")
+
+    # Convolutional Layer 1 + Batch Normalization + ReLU + Max Pooling
+    x = layers.Conv2D(16, (3, 3), activation='relu', kernel_regularizer=regularizers.l2(0.001))(image_input)
+    x = layers.BatchNormalization()(x)
+    x = layers.MaxPooling2D((2, 2))(x)
+
+    # Convolutional Layer 2 + Batch Normalization + ReLU + Max Pooling
+    x = layers.Conv2D(32, (3, 3), activation='relu', kernel_regularizer=regularizers.l2(0.001))(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.MaxPooling2D((2, 2))(x)
+
+    # Convolutional Layer 3 + Batch Normalization + ReLU + Max Pooling
+    x = layers.Conv2D(64, (3, 3), activation='relu', kernel_regularizer=regularizers.l2(0.001))(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.MaxPooling2D((2, 2))(x)
+
+    # Global Average Pooling to reduce dimensions
+    x = layers.GlobalAveragePooling2D()(x)
+
+    # Additional features input (for scalar features like month sine/cosine, latitude, longitude)
+    additional_features_input = Input(shape=(additional_inputs_shape,), name="Additional_Features_Input")
+
+    # Concatenate the CNN output with additional features (month sin/cos, lat, lon)
+    x = concatenate([x, additional_features_input])
+
+    # Dense layer after concatenation with Dropout for regularization
+    x = layers.Dense(64, activation='relu', kernel_regularizer=regularizers.l2(0.001))(x)
+    x = layers.Dropout(0.3)(x)
+
+    # Output layer with a single neuron for scalar prediction
+    output = layers.Dense(1, activation='linear', name="Scalar_Output")(x)
+
+    # Final model with image and additional features inputs
+    model = models.Model(inputs=[image_input, additional_features_input], outputs=output)
+
+    return model
+'''
+def build_cnn_model_features(input_shape, additional_inputs_shape):
+    # Image input (temperature)
+    image_input = Input(shape=input_shape, name="Image_Input")
 
     # Convolutional Layer 1 + ReLU Activation + Max Pooling
     x = layers.Conv2D(16, (3, 3), activation='relu', kernel_regularizer=regularizers.l2(0.001))(image_input)
@@ -331,26 +372,19 @@ def build_cnn_model_features(input_shape, num_rivers):
     # Flatten the convolutional output
     x = layers.Flatten()(x)
 
-    # River label input (one-hot encoding)
-    river_input = Input(shape=(num_rivers,))
+    # Combined input for month sine/cosine, latitude, and longitude
+    additional_features_input = Input(shape=(additional_inputs_shape,), name="Additional_Features_Input")
 
-    # Month inputs for sine and cosine values
-    month_sin_input = Input(shape=(1,), name='Month_Sin')
-    month_cos_input = Input(shape=(1,), name='Month_Cos')
-
-    # Concatenate the CNN output with the river label and month sine/cosine inputs
-    x = concatenate([x, river_input, month_sin_input, month_cos_input])
+    # Concatenate the CNN output with river label and additional features (month sin/cos, lat, lon)
+    x = concatenate([x, additional_features_input])
 
     # Dense layer after concatenation
     x = layers.Dense(64, activation='relu', kernel_regularizer=regularizers.l2(0.001))(x)
 
-    # Output layer with linear activation (for temperature predictions)
-    output = layers.Dense(256 * 256, activation='linear')(x)
+    # Output layer with linear activation (for scalar temperature prediction)
+    output = layers.Dense(1, activation='linear', name="Scalar_Output")(x)
 
-    # Reshape the output to (256, 256)
-    output = layers.Reshape((256, 256))(output)
+    # Final model with three inputs
+    model = models.Model(inputs=[image_input, additional_features_input], outputs=output)
 
-    # Final model with four inputs (image, river label, month sine, and month cosine)
-    model = models.Model(inputs=[image_input, river_input, month_sin_input, month_cos_input], outputs=output)
-
-    return model
+    return model'''
