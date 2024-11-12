@@ -35,103 +35,7 @@ def build_cnn_baseline(input_shape):
     model.add(layers.Dense(1, activation='linear'))
 
     return model
-'''
-def build_cnn_baseline(input_shape):
-    model = models.Sequential()
 
-    # Capa 1: Convolucional + Activación ReLU + Max Pooling
-    model.add(layers.Conv2D(16, (3, 3), activation='relu', kernel_regularizer=regularizers.l2(0.001),input_shape=input_shape))
-    model.add(layers.MaxPooling2D((2, 2)))
-
-    # Capa 2: Convolucional + Activación ReLU + Max Pooling
-    model.add(layers.Conv2D(32, (3, 3), activation='relu',kernel_regularizer=regularizers.l2(0.001)))
-    model.add(layers.MaxPooling2D((2, 2)))
-
-    # Capa de aplanamiento
-    model.add(layers.Flatten())
-
-    # Capa densa
-    model.add(layers.Dense(64, activation='relu',kernel_regularizer=regularizers.l2(0.001)))
-
-    model.add(layers.Dense(1, activation='linear'))
-    
-    return model'''
-
-def build_simplified_cnn_model_label(input_shape, num_rivers):
-    # Entrada de la imagen (temperatura)
-    image_input = Input(shape=input_shape)
-
-    # Capa 1: Convolucional + Activación ReLU + Max Pooling
-    x = layers.Conv2D(16, (3, 3), activation='relu', kernel_regularizer=regularizers.l2(0.001))(image_input)
-    x = layers.MaxPooling2D((2, 2))(x)
-
-    # Capa 2: Convolucional + Activación ReLU + Max Pooling
-    x = layers.Conv2D(32, (3, 3), activation='relu', kernel_regularizer=regularizers.l2(0.001))(x)
-    x = layers.MaxPooling2D((2, 2))(x)
-
-    # Aplanamiento de la salida convolucional
-    x = layers.Flatten()(x)
-
-    # Entrada de la etiqueta del río (one-hot encoding)
-    river_input = Input(shape=(num_rivers,))
-
-    # Concatenar la salida de la CNN con la entrada del río
-    x = concatenate([x, river_input])
-
-    # Capa densa después de la concatenación
-    x = layers.Dense(64, activation='relu', kernel_regularizer=regularizers.l2(0.001))(x)
-
-    # Capa de salida con activación lineal (para predicciones de temperatura)
-    output = layers.Dense(256 * 256, activation='linear')(x)
-
-    # Reshape de la salida a la forma (256, 256)
-    output = layers.Reshape((256, 256))(output)
-
-    # Crear el modelo final con dos entradas (imagen + río)
-    model = models.Model(inputs=[image_input, river_input], outputs=output)
-
-    return model
-
-def build_cnn_model_label(input_shape, num_rivers):
-    # Entrada de la imagen (temperatura)
-    image_input = Input(shape=input_shape)
-
-    x = layers.Conv2D(32, (3, 3), activation='relu', input_shape=input_shape)(image_input)
-    x = layers.MaxPooling2D((2, 2))(x)
-
-    # Capa 2: Convolucional + Activación ReLU + Max Pooling
-    x = layers.Conv2D(64, (3, 3), activation='relu')(x)
-    x = layers.MaxPooling2D((2, 2))(x)
-
-    # Capa 3: Convolucional + Activación ReLU + Max Pooling
-    x = layers.Conv2D(128, (3, 3), activation='relu')(x)
-    x = layers.MaxPooling2D((2, 2))(x)
-
-    # Capa 4: Convolucional + Activación ReLU
-    x = layers.Conv2D(128, (3, 3), activation='relu')(x)
-
-    # Aplanamiento de la salida convolucional
-    x = layers.Flatten()(x)
-
-    # Entrada de la etiqueta del río (one-hot encoding)
-    river_input = Input(shape=(num_rivers,))
-
-    # Concatenar la salida de la CNN con la entrada del río
-    x = concatenate([x, river_input])
-
-    # Capa densa después de la concatenación
-    x = layers.Dense(256, activation='relu', kernel_regularizer=regularizers.l2(0.001))(x)
-
-    # Capa de salida con activación lineal (para predicciones de temperatura)
-    output = layers.Dense(256 * 256, activation='linear')(x)
-
-    # Reshape de la salida a la forma (256, 256)
-    output = layers.Reshape((256, 256))(output)
-
-    # Crear el modelo final con dos entradas (imagen + río)
-    model = models.Model(inputs=[image_input, river_input], outputs=output)
-
-    return model
 
 def build_cnn_model(input_shape):
     model = models.Sequential()
@@ -243,11 +147,13 @@ def build_transfer_model(input_shape, base_model_trainable=False):
 
 # Función de error cuadrático medio
 def root_mean_squared_error(y_true, y_pred):
+    y_true = tf.cast(y_true, tf.float32)
+    y_pred = tf.cast(y_pred, tf.float32)
     return tf.sqrt(tf.reduce_mean(tf.square(y_pred - y_true)))
 
 def conservation_energy_loss(y_true, y_pred, model_input_batch, alpha=0.5, beta=0.5, threshold=5.0):
     # Calcular el promedio de los primeros tres canales de model_input_batch
-    lst_batch = tf.reduce_mean(tf.cast(model_input_batch[:, :, :, :3], 'float32'), axis=-1)
+    lst_batch = tf.reduce_mean(tf.cast(model_input_batch[0][:, :, :, :3], 'float32'))#, axis=-1)
 
     # Calcular Q_in y Q_out
     Q_in = tf.maximum(lst_batch - y_pred, 0)  # Solo calor hacia el agua cuando LST > predicción

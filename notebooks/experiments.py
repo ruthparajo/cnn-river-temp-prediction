@@ -16,7 +16,8 @@ from datetime import datetime
 import numpy as np
 import argparse
 from collections import Counter
-
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
 
 
 # -------------------------------- Load data --------------------------------
@@ -32,7 +33,7 @@ total_times = {}
 complete_rivers = []
 filter_river = None
 W=256
-time_split = True
+time_split = False
 
 # Load rivers
 for subdir, dirs, files in os.walk(source_folder):
@@ -99,6 +100,7 @@ for k,v in all_dir_paths.items():
                         
                         r,m = load_raster(file_path, False)
                         var = resize_image(r, W,W)
+                        var = np.where(np.isnan(var), 0.0, var)
                         imgss[lab] = var
                     else:
                         var = imgss[lab]
@@ -145,7 +147,7 @@ def get_results(test_target, test_prediction, rivers, labels, test_index):
 def get_months_vectorized(times):
     month_cosine_dict = {}
     month_sinus_dict = {}
-    
+    cos_to_month = {}
     # Fill the dictionary with cosine values for each month
     for month in range(1, 13):
         # Scale the month from 0 to 1 (January as 0, December as 11/12)
@@ -156,6 +158,7 @@ def get_months_vectorized(times):
         # Store it in the dictionary
         month_cosine_dict[month] = month_cosine
         month_sinus_dict[month] = month_sinus
+        cos_to_month[month_cosine]= month
        
     
     times_dt = pd.to_datetime(times)
@@ -170,11 +173,12 @@ def get_months_vectorized(times):
         
     cosine_months = np.array(cosine_months)
     sine_months = np.array(sine_months)
-    return cosine_months, sine_months
+    
+    return cosine_months, sine_months, cos_to_month
     
 
 
-def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inputs=None, stratified=None, physics_guided=None):
+def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inputs=None, stratified=None, physics_guided=None, time_split=None):
     print(f"Running experiment with model={model_name}, batch_size={batch_size}, epochs={epochs}, inputs = {inputs}")
     
     # Choose inputs
@@ -192,7 +196,7 @@ def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inp
     # The final combined input is stored in input_data
     input_data = combined_input
     
-    cosine_months, sine_months = get_months_vectorized(total_times['lst'])
+    cosine_months, sine_months, cos_to_month = get_months_vectorized(total_times['lst'])
     additional_inputs = np.column_stack((cosine_months, sine_months))
 
     if time_split:
@@ -248,7 +252,7 @@ def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inp
     
     # Start model
     start_time = time.time()
-    if model_name == "img_wise_CNN":
+    if model_name == "baseline_CNN":
         if conditioned:
             model = build_cnn_model_features(input_args[0], input_args[1])
         else:
@@ -266,30 +270,91 @@ def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inp
         model = build_simplified_cnn_model_improved(input_args)
 
     
-    # Train the model
-    if not physics_guided:
-        model.compile(optimizer='adam', loss='mean_squared_error', metrics=['mae'])
-        history = model.fit(model_input, train_target, batch_size=batch_size, epochs=epochs, validation_data=(val_model_input, validation_target))
-    else:
-        dataset = tf.data.Dataset.from_tensor_slices((*model_input, train_target) if conditioned else (model_input, train_target))
+    # Create batch dataset
+    dataset = tf.data.Dataset.from_tensor_slices((*model_input, train_target) if conditioned else (model_input, train_target))
+    dataset = dataset.batch(batch_size)
 
-        dataset = dataset.batch(batch_size)
-        optimizer = tf.keras.optimizers.Adam()
-        for epoch in range(epochs):
-            print(f"Epoch {epoch + 1}/{epochs}")
-            for batch in dataset:
-                # Handle batch based on whether model_input is a tuple or a single dataset
-                if isinstance(model_input, tuple):
-                    model_input_batch = batch[:-1]  # All except the last element (target_batch)
-                    target_batch = batch[-1]        # Last element is target_batch
-                else:
-                    model_input_batch, target_batch = batch  # Direct unpacking for single dataset
-
-                with tf.GradientTape() as tape:
-                    y_pred = model(*model_input_batch, training=True) if isinstance(model_input_batch, tuple) else model(model_input_batch, training=True)
+    dataset_val = tf.data.Dataset.from_tensor_slices((*val_model_input, validation_target) if conditioned else (val_model_input, validation_target))
+    dataset_val = dataset_val.batch(batch_size)
+    
+    #optimizer = tf.keras.optimizers.SGD()
+    optimizer = tf.keras.optimizers.Adam()
+    errors_log = {"epoch": [], "month": [], "error": []}
+    loss_per_epoch = []
+    val_loss_per_epoch = []
+    
+    # Train model
+    for epoch in range(epochs):
+        epoch_loss = 0  
+        num_batches = 0
+        for batch in dataset:
+            if conditioned:
+                model_input_batch = batch[:-1]  
+                target_batch = batch[-1]        
+            else:
+                model_input_batch, target_batch = batch  # Desempaquetado directo para un solo dataset
+    
+            with tf.GradientTape() as tape:
+                y_pred = model([*model_input_batch], training=True) if conditioned else model(model_input_batch, training=True)
+                if physics_guided:
                     loss = conservation_energy_loss(target_batch, y_pred, model_input_batch, alpha=0.5, beta=0.5)
-                gradients = tape.gradient(loss, model.trainable_variables)
-                optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+                else:
+                    loss = root_mean_squared_error(target_batch, y_pred) 
+            
+            # Calculate gradients and apply optimization
+            gradients = tape.gradient(loss, model.trainable_variables)
+            optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+
+            epoch_loss += loss.numpy()
+            num_batches += 1
+            
+            # Log variables values and error
+            y_true = tf.cast(target_batch, tf.float32)
+            y_pred = tf.cast(y_pred, tf.float32)
+            for i, (value1, value2) in enumerate(model_input_batch[1].numpy()):  
+                error = tf.abs(y_pred[i] - y_true[i]).numpy()
+                errors_log["epoch"].append(epoch + 1)
+                errors_log["month"].append(cos_to_month[value1])
+                errors_log["error"].append(error)
+                
+        avg_epoch_loss = epoch_loss / num_batches
+        loss_per_epoch.append(avg_epoch_loss)
+        val_loss = 0
+        val_batches = 0
+        for val_batch in dataset_val:
+            if conditioned:
+                val_input_batch = batch[:-1]  
+                val_target_batch = batch[-1]        
+            else:
+                val_input_batch, val_target_batch = batch
+            val_pred = model([*val_input_batch], training=False) if conditioned else model(val_input_batch, training=False)
+            val_loss += root_mean_squared_error(val_target_batch, val_pred).numpy()
+            val_batches += 1
+            
+        avg_val_loss = val_loss / val_batches
+        val_loss_per_epoch.append(avg_val_loss)
+    
+        print(f"Epoch {epoch + 1}/{epochs} - Loss: {avg_epoch_loss:.4f} - Val Loss: {avg_val_loss:.4f}")
+
+
+
+    # Convert the error log to a DataFrame for further analysis
+    errors_df = pd.DataFrame(errors_log)
+    errors_df["error"] = errors_df["error"].apply(lambda x: x[0] if len(x) == 1 else x)
+    print('Done training!')
+
+    num = len(os.listdir('../results/error_logs'))
+    errors_df.to_csv(f'../results/error_logs/{model_name}_exp_{num}.csv',index=False)
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(range(1, epochs + 1), loss_per_epoch, label='Training Loss')
+    plt.plot(range(1, epochs + 1), val_loss_per_epoch, label='Validation Loss')
+    plt.title("Training and Validation Loss Curve")
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.legend()
+    fig1 = plt.gcf()
+    fig1.savefig(f"../results/learning_curves/{model_name}_exp_{num}.png", dpi=100) 
     
     # Evaluate results
     test_prediction = model.predict(test_model_input)
@@ -307,18 +372,17 @@ def run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inp
     laabeel = 'label, month' if conditioned else 'no label'
     var_inputs = '' if inputs == None else ', '.join(inputs)
     variables = ', '.join([var_inputs, laabeel])
-    details = {'RMSE':rmse_test,'Variables':variables,'Input': f'{len(np.unique(labels))} rivers', 'Output': 'wt', \
+    details = {'Experiment':num,'RMSE':rmse_test,'Variables':variables,'Input': f'{len(np.unique(labels))} rivers', 'Output': 'wt', \
                'Resolution': W, 'nº samples': len(data_targets), 'Batch size': batch_size, 'Epochs': epochs, 'Date':current_date, \
                'Time':current_time, 'Duration': duration, 'Loss':  'Physics-guided' if physics_guided else 'RMSE'}
     
     file_path = f"../results/{model_name}_results.xlsx"
     save_excel(file_path, details, excel = 'Results')
     
-    #mean_results['Model'] = model_name
-    #file_path = f"../results/all_results.xlsx"
-    #save_excel(file_path, rmse_test, excel = 'Results')
     print('RMSE:',rmse_test,'\n')
     print(f"Experiment {model_name} with batch_size={batch_size} and epochs={epochs} completed.\n")
+
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Script to run experiments with deep learning models.")
@@ -329,10 +393,10 @@ if __name__ == '__main__':
     parser.add_argument('--epochs_list', nargs='+', type=int, default=[10, 50, 100],
                         help="List of epochs for training the model. Example: --epochs_list 10 50 100")
     parser.add_argument('--model_names', nargs='+', type=str, default=['img_wise_CNN', 'UNet', 'CNN', 'img_2_img'],
-                        help="List of model names. Example: --model_names img_wise_CNN UNet CNN img_2_img")
+                        help="List of model names. Example: --model_names baseline_CNN UNet CNN img_2_img")
     parser.add_argument('--inputs', nargs='+', type=str, required=True,
                         help="List of inputs to include . Example: --inputs lst ndvi")
-
+    
     # Parse arguments
     args = parser.parse_args()
 
@@ -341,34 +405,12 @@ if __name__ == '__main__':
     epochs_list = args.epochs_list
     model_names = args.model_names
     inputs = args.inputs
-
-    # Filter inputs as needed
-    #inputs = [d for d in inputs if d not in ['wt', 'masked']]
+    
 
     # Run experiments with parameter combinations
     for model_name in model_names:
         for batch_size in batch_sizes:
             for epochs in epochs_list:
-                run_experiment(model_name, batch_size, epochs, W=256, conditioned=True, inputs=inputs, stratified=False, physics_guided=False)
-                # Additional condition for 'img_wise_CNN'
-                #if model_name == 'img_wise_CNN':
-                    #run_experiment(model_name, batch_size, epochs, W=256, conditioned=True, inputs=inputs, stratified=False, physics_guided=True)
-
-'''
-if '__main__':
-    batch_sizes = [16, 32]
-    epochs_list = [10, 50]
-    model_names = ['UNet', 'CNN', 'img_2_img','img_wise_CNN','img_wise_CNN_improved']
-    inputs = [d for d in data_paths if d not in ['wt_interpolated', 'masked','slope', 'discharge', 'altitude']]
-    inputs_comb = [[d for d in data_paths if d not in ['wt_interpolated', 'masked','slope', 'discharge']],[d for d in data_paths if d not in ['wt_interpolated', 'masked','ndvi']],[d for d in data_paths if d not in ['wt_interpolated', 'masked']], [d for d in data_paths if d not in ['wt_interpolated', 'masked','slope', 'discharge','ndvi']]]
-    model_name = 'img_wise_CNN'
-    
-    for model_name in model_names:
-        for batch_size in batch_sizes:
-            for epochs in epochs_list:
-                #for ph in [True, False]:
-                run_experiment(model_name, batch_size, epochs, W=256, conditioned=False, inputs=inputs, stratified = False, physics_guided = False)
-                if model_name == 'img_wise_CNN':
-                    run_experiment(model_name, batch_size, epochs, W=256, conditioned=True, inputs=inputs, stratified = False, physics_guided = False)'''
+                run_experiment(model_name, batch_size, epochs, W=256, conditioned=True, inputs=inputs, stratified=False, physics_guided=False, time_split = time_split)
                 
 

@@ -101,16 +101,6 @@ def split_data(X, y, validation_split=0.1, test_split=0.1):
     test_index = np.random.choice(rem_index, int(test_split * n), replace=False)
     train_index = list(set(rem_index) - set(test_index))  # Remaining for training
 
-    # Split data into train, validation, and test sets
-    validation_input = X[validation_index, :] / 255.0  # Normalize inputs
-    validation_target = y[validation_index, :]
-
-    test_input = X[test_index, :] / 255.0  # Normalize inputs
-    test_target = y[test_index, :]
-
-    train_input = X[train_index, :] / 255.0  # Normalize inputs
-    train_target = y[train_index, :]
-
     return train_index, validation_index, test_index#train_input, train_target, validation_input, validation_target, test_input, test_target
 
 def evaluate_model(y_true, y_pred):
