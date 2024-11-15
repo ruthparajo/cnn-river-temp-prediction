@@ -48,12 +48,15 @@ def load_all_data(
     for i, dir_p in enumerate(dir_paths):
         for subdir, dirs, files in os.walk(dir_p):
             if subdir != dir_p and not subdir.endswith('masked') and not subdir.endswith('.ipynb_checkpoints') and subdir.split('/')[-1] in rivers:
-                all_dir_paths[data_paths[i]].append(subdir) if not dir_p.endswith('altitude') else all_dir_paths[data_paths[i]].extend(files)
-    
+                all_dir_paths[data_paths[i]].append(subdir)
+            elif dir_p.endswith('altitude'):
+                all_dir_paths[data_paths[i]].extend([f for f in files if f.split('.')[0] in rivers])
+      
     # Cargar datos de entrada
-    labels = []
+    
     for k, v in all_dir_paths.items():
         if k not in ['discharge', 'slope', 'altitude']:
+            labels = []
             list_rgb = [True] * len(v) if k in ['lst', 'masked'] else [False] * len(v)
             data, times = load_data(v, W, list_rgb)
             if k != 'masked':
@@ -87,7 +90,10 @@ def load_all_data(
                             var = resize_image(r, W, W)
                             var = np.where(np.isnan(var), 0.0, var)
                             imgss[lab] = var
-                        total.append(imgss[lab])
+                        else:
+                            var = imgss[lab]
+                            
+                total.append(var)
 
             total_data[k] = np.array(total)
             print(f"{k}: {np.array(total).shape}")
@@ -434,7 +440,6 @@ if __name__ == '__main__':
         data_folder = '../data/preprocessed/'
     else:
         data_folder = '../data/preprocessed/64x64/'
-    print(W)
     
     data = load_all_data(
     source_folder='../data/external/shp/river_cells_oficial',
