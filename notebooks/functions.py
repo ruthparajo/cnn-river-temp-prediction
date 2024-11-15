@@ -12,6 +12,7 @@ from rasterio.transform import from_origin
 import shutil
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
+import geopandas as gpd
 
 
 def load_raster(filepath,rgb = True):
@@ -403,3 +404,25 @@ def load_river_raster(filepath):
     r, m = load_raster(filepath, False)
     name = filepath.split('/')[-1].split('.')[0].split('bw_')[-1]
     return name, r
+
+def get_rivers_altitude(source_folder):
+    rivs=[]
+    with rasterio.open('../../../../../data/simon.walther/swissAltitude/swissAltitude.vrt') as src:
+        for f in os.listdir(source_folder):
+            if os.path.join(source_folder, f).endswith('shp'):
+                river = gpd.read_file(os.path.join(source_folder, f))
+                x_coords, y_coords, z_coords = project_linestrings_to_points(river)
+                
+                if z_coords == []:
+                    dir_altitudes = '../data/external/altitudes'
+                    
+                    for i in range(len(x_coords)):
+                        lon, lat = x_coords[i], y_coords[i]
+                        row, col = src.index(lon, lat)
+                        window = Window(col_off=col, row_off=row, width=1, height=1)
+                        pixel_value = src.read(1, window=window)
+                        z_coords.append(pixel_value[0][0])
+                        
+                if np.mean(z_coords) <= 800:
+                    rivs.append(f.split('station_')[-1].split('.')[0])
+    return rivs

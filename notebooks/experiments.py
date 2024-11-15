@@ -25,45 +25,34 @@ for gpu in gpus:
     tf.config.experimental.set_memory_growth(gpu, True)
 
 def load_all_data(
-    source_folder='../data/external/raster_masks',
+    source_folder='../data/external/shp/river_cells_oficial',
     source_path='../data/preprocessed/',
     data_paths=['lst', 'slope', 'discharge', 'ndvi', 'altitude'],
-    filter_river=None,
+    filter_altitude=None,
     W=256,
-    time_split=False
+    time_split=False,
 ):
-    # Inicializar variables y rutas
-    rivers = {}
+    
     dir_paths = [os.path.join(source_path, p) for p in data_paths]
+    
     all_dir_paths = {k: [] for k in data_paths}
     total_data = {}
     total_times = {}
-    complete_rivers = []
 
-    # Cargar ríos
-    filepaths = [os.path.join(source_folder, f) for f in os.listdir(source_folder) if os.path.isfile(os.path.join(source_folder, f))]
-    with Pool() as pool:
-        river_data = pool.map(load_river_raster, filepaths)
-        rivers = {name: data for name, data in river_data}
-
+    if not filter_altitude:
+        rivers = [f.split('station_')[-1].split('.')[0] for f in os.listdir(source_folder) if os.path.join(source_folder, f).endswith('shp')]
+    else:
+        rivers = get_rivers_altitude(source_folder)
+    
     # Cargar rutas de entrada
     for i, dir_p in enumerate(dir_paths):
-        if data_paths[i] != 'discharge' and data_paths[i] != 'slope' and data_paths[i] != 'altitude':
-            imgs_per_river = Counter()
         for subdir, dirs, files in os.walk(dir_p):
-            if subdir != dir_p and not subdir.endswith('masked') and not subdir.endswith('.ipynb_checkpoints'):
-                all_dir_paths[data_paths[i]].append(subdir)
-            elif subdir.endswith('masked') and 'masked' in data_paths:
-                all_dir_paths['masked'].append(subdir)
-            elif dir_p.endswith('altitude'):
-                all_dir_paths[data_paths[i]].extend(files)
-
+            if subdir != dir_p and not subdir.endswith('masked') and not subdir.endswith('.ipynb_checkpoints') and subdir.split('/')[-1] in rivers:
+                all_dir_paths[data_paths[i]].append(subdir) if not dir_p.endswith('altitude') else all_dir_paths[data_paths[i]].extend(files)
+    
     # Cargar datos de entrada
     labels = []
     for k, v in all_dir_paths.items():
-        if filter_river is not None:
-            v = [v[i] for i in filter_river]
-
         if k not in ['discharge', 'slope', 'altitude']:
             list_rgb = [True] * len(v) if k in ['lst', 'masked'] else [False] * len(v)
             data, times = load_data(v, W, list_rgb)
@@ -114,7 +103,6 @@ def load_all_data(
     data_targets = np.array(wt_temp)
 
     return total_data, total_times, data_targets, labels
-
 
 def get_results(test_target, test_prediction, rivers, labels, test_index):
     mean_results = {k:[] for k in results.keys()}
@@ -180,7 +168,7 @@ def get_months_vectorized(times):
     return cosine_months, sine_months, cos_to_month
 
 def get_lat_lon(labels):
-    file_path = '../data/raw/wt/cell_coordinates.csv'
+    file_path = '../data/raw/wt/cell_coordinates_oficial.csv'
     lat_lon = pd.read_csv(file_path)
     lats=[]
     lons=[]
@@ -301,6 +289,7 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
     errors_log = {"epoch": [], "month": [], "error": []}
     loss_per_epoch = []
     val_loss_per_epoch = []
+
     
     # Train model
     for epoch in range(epochs):
@@ -313,11 +302,12 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
                 target_batch = batch[-1]        
             else:
                 model_input_batch, target_batch = batch  # Desempaquetado directo para un solo dataset
-    
+            
             with tf.GradientTape() as tape:
                 y_pred = model([*model_input_batch], training=True) if conditioned else model(model_input_batch, training=True)
                 if physics_guided:
-                    loss = conservation_energy_loss(target_batch, y_pred, model_input_batch, alpha=0.5, beta=0.5)
+                    lst_batch = model_input_batch[0][:, :, :, :3] if conditioned else model_input_batch[:, :, :, :3]
+                    loss = conservation_energy_loss(target_batch, y_pred, lst_batch, alpha=0.5, beta=0.5)
                 else:
                     loss = root_mean_squared_error(target_batch, y_pred) 
             
@@ -401,12 +391,12 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
     variables = ', '.join([var_inputs, laabeel]) if conditioned else var_inputs
     details = {'Experiment':num,'RMSE':rmse_test,'Variables':variables,'Input': f'{len(np.unique(labels))} rivers', 'Split': split[0], \
                'nº samples': len(data_targets), 'Batch size': batch_size, 'Epochs': epochs, 'Date':current_date, \
-               'Time':current_time, 'Duration': duration, 'Loss':  'Physics-guided' if physics_guided else 'RMSE'}
+               'Time':current_time, 'Duration': duration, 'Loss':  'Physics-guided' if physics_guided else 'RMSE', 'Resolution':W}
     
     file_path = f"../results/{model_name}_results.xlsx"
     save_excel(file_path, details, excel = 'Results')
     
-    print(f"Experiment {model_name} with batch_size={batch_size} and epochs={epochs} completed.\n")
+    print(f"Experiment {model_name} with batch_size={batch_size} and epochs={epochs} completed and {input_shape} inputs .\n")
 
 
 if __name__ == '__main__':
@@ -426,6 +416,9 @@ if __name__ == '__main__':
     parser.add_argument('--split', nargs='+', type=str, required=True,
                         help="Type of data split . Example: --split random, time, stratified")
 
+    parser.add_argument('--resolution', nargs='+', type=int, required=True,
+                        help="Type of data split . Example: --split random, time, stratified")
+
     # Parse arguments
     args = parser.parse_args()
 
@@ -435,12 +428,20 @@ if __name__ == '__main__':
     model_names = args.model_names
     inputs = args.inputs
     split = args.split
-
+    W = args.resolution[0]
+    
+    if W==128:
+        data_folder = '../data/preprocessed/'
+    else:
+        data_folder = '../data/preprocessed/64x64/'
+    print(W)
+    
     data = load_all_data(
-    source_folder='../data/external/raster_masks',
-    source_path='../data/preprocessed/',
+    source_folder='../data/external/shp/river_cells_oficial',
+    source_path=data_folder,
     data_paths= inputs,
-    W=256,
+    filter_altitude=False,
+    W=W,
     time_split=True if split=='time' else False)
     
 
@@ -448,7 +449,9 @@ if __name__ == '__main__':
     for model_name in model_names:
         for batch_size in batch_sizes:
             for epochs in epochs_list:
-                run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=False, inputs=inputs, split=split, physics_guided=False)
+                run_experiment(data, model_name, batch_size, epochs, W=W, conditioned=False, inputs=inputs, split=split, physics_guided=True)
+                run_experiment(data, model_name, batch_size, epochs, W=W, conditioned=False, inputs=inputs, split=split, physics_guided=False)
+                
 
                 
 
