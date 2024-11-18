@@ -58,7 +58,7 @@ def build_cnn_baseline2(input_shape):
     model.add(layers.MaxPooling2D((2, 2)))
 
     # Global Average Pooling
-    model.add(layers.GlobalAveragePooling2D())
+    model.add(layers.GlobalAveragePooling2D()) # try flatten
 
     # Capas densas con Dropout reducido
     model.add(layers.Dense(64, activation='relu', kernel_regularizer=regularizers.l2(0.0001)))
@@ -153,7 +153,7 @@ def build_cnn_model_features2(input_shape, additional_inputs_shape):
     output = layers.Dense(1, activation='linear')(combined)
 
     # Definición del modelo con ambas entradas
-    model = Model(inputs=[image_input, additional_features_input], outputs=output)
+    model = models.Model(inputs=[image_input, additional_features_input], outputs=output)
 
     return model
 

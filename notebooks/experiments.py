@@ -18,6 +18,12 @@ import argparse
 from collections import Counter
 import os
 from multiprocessing import Pool
+import tensorflow as tf
+import io
+from contextlib import redirect_stdout
+import logging
+
+logging.getLogger('tensorflow').setLevel(logging.ERROR)
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
 gpus = tf.config.experimental.list_physical_devices('GPU')
@@ -211,7 +217,15 @@ def get_split_index(split, input_data, data_targets, labels):
         
     return train_index, validation_index, test_index
             
-
+def get_discharge(labels, times_ordered):
+    discharge = pd.read_csv('../data/preprocessed/discharge/discharge.csv', index_col=0)
+    disch = []
+    for cell, date in zip(labels, times_ordered):
+        value = discharge[(discharge["Cell"] == cell) & (discharge["Date"] == date)]["Discharge"]
+        if not value.empty:
+            disch.append(value.values[0])
+    disch = np.array(disch)
+    return disch
 
 def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=False, inputs=None, split=None, physics_guided=None):
 
@@ -220,7 +234,12 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
     total_data, total_times, data_targets, labels = data
     cosine_months, sine_months, cos_to_month = get_months_vectorized(total_times['lst'])
     lat, lon = get_lat_lon(labels)
-    additional_inputs = np.column_stack((cosine_months, sine_months, lat, lon))
+    discharge = get_discharge(labels, total_times['lst'])
+    additional_inputs = np.column_stack((cosine_months, sine_months, lat, lon, discharge))
+
+    num = len(os.listdir('../results/error_logs'))
+    grad_output_folder = f'../plots/grad_cam/{model_name}/exp_{num}'
+    os.makedirs(grad_output_folder, exist_ok=True)
     
     # Adapt input shapes
     inputs_d = [total_data[inp] for inp in inputs]
@@ -269,9 +288,9 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
     start_time = time.time()
     if model_name == "baseline_CNN":
         if conditioned:
-            model = build_cnn_model_features(input_args[0], input_args[1])
+            model = build_cnn_model_features2(input_args[0], input_args[1])
         else:
-            model = build_cnn_baseline(input_args)
+            model = build_cnn_baseline2(input_args)
     elif model_name == 'CNN':
         model = build_cnn_model(input_args)
     elif model_name == 'img_2_img':
@@ -283,6 +302,11 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
         model = build_transfer_model((W, W, 3))
     elif model_name == "img_wise_CNN_improved":
         model = build_simplified_cnn_model_improved(input_args)
+        
+    summary_file = f"../models/{model_name}_summary.txt"
+    with open(summary_file, "w") as f:
+        with redirect_stdout(f):
+            model.summary()
     
     # Create batch dataset
     dataset = tf.data.Dataset.from_tensor_slices((*model_input, train_target) if conditioned else (model_input, train_target))
@@ -296,7 +320,12 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
     loss_per_epoch = []
     val_loss_per_epoch = []
 
-    
+    last_conv_layer_name = None
+    for layer in reversed(model.layers):
+        if isinstance(layer, tf.keras.layers.Conv2D):
+            last_conv_layer_name = layer.name
+            break
+     
     # Train model
     for epoch in range(epochs):
         epoch_loss = 0  
@@ -344,12 +373,14 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
         loss_per_epoch.append(avg_epoch_loss)
         val_loss = 0
         val_batches = 0
+        
         for val_batch in dataset_val:
             if conditioned:
                 val_input_batch = batch[:-1]  
                 val_target_batch = batch[-1]        
             else:
                 val_input_batch, val_target_batch = batch
+            
             val_pred = model([*val_input_batch], training=False) if conditioned else model(val_input_batch, training=False)
             val_loss += root_mean_squared_error(val_target_batch, val_pred).numpy()
             val_batches += 1
@@ -365,7 +396,6 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
     errors_df["error"] = errors_df["error"].apply(lambda x: x[0] if len(x) == 1 else x)
     print('Done training!')
 
-    num = len(os.listdir('../results/error_logs'))
     errors_df.to_csv(f'../results/error_logs/{model_name}_exp_{num}.csv',index=False)
 
     plt.figure(figsize=(10, 5))
@@ -392,7 +422,7 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
     current_time = datetime.now().strftime("%H:%M:%S")
     
     # Save model results
-    laabeel = 'month' if conditioned else None
+    laabeel = 'month, discharge, lat, lon, ADAM' if conditioned else None
     var_inputs = '' if inputs == None else ', '.join(inputs)
     variables = ', '.join([var_inputs, laabeel]) if conditioned else var_inputs
     details = {'Experiment':num,'RMSE':rmse_test,'Variables':variables,'Input': f'{len(np.unique(labels))} rivers', 'Split': split[0], \
@@ -401,8 +431,12 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
     
     file_path = f"../results/{model_name}_results.xlsx"
     save_excel(file_path, details, excel = 'Results')
+    print(model.summary())
+    if conditioned:
+        print(f"Experiment {model_name} with batch_size={batch_size} and epochs={epochs} completed and {input_shape, additional_inputs.shape} inputs .\n")
+    else:
     
-    print(f"Experiment {model_name} with batch_size={batch_size} and epochs={epochs} completed and {input_shape} inputs .\n")
+        print(f"Experiment {model_name} with batch_size={batch_size} and epochs={epochs} completed and {input_shape} inputs .\n")
 
 
 if __name__ == '__main__':
@@ -454,8 +488,8 @@ if __name__ == '__main__':
     for model_name in model_names:
         for batch_size in batch_sizes:
             for epochs in epochs_list:
-                run_experiment(data, model_name, batch_size, epochs, W=W, conditioned=False, inputs=inputs, split=split, physics_guided=True)
-                run_experiment(data, model_name, batch_size, epochs, W=W, conditioned=False, inputs=inputs, split=split, physics_guided=False)
+                #run_experiment(data, model_name, batch_size, epochs, W=W, conditioned=False, inputs=inputs, split=split, physics_guided=True)
+                run_experiment(data, model_name, batch_size, epochs, W=W, conditioned=True, inputs=inputs, split=split, physics_guided=False)
                 
 
                 
