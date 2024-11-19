@@ -31,7 +31,8 @@ for gpu in gpus:
     tf.config.experimental.set_memory_growth(gpu, True)
 
 
-def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=False, inputs=None, split=None, physics_guided=None, filt_alt=None):
+def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=False, inputs=None, split=None,\
+                   physics_guided=None, filt_alt=None, num=0):
 
     print(f"Running experiment with model={model_name}, batch_size={batch_size}, epochs={epochs}, inputs = {inputs}")
 
@@ -42,7 +43,7 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
     discharge = get_discharge(labels, total_times['lst'])
     additional_inputs = np.column_stack((cosine_months, sine_months, lat, lon, discharge))
 
-    num = len(os.listdir('../results/error_logs'))
+    
     grad_output_folder = f'../plots/grad_cam/{model_name}/exp_{num}'
     os.makedirs(grad_output_folder, exist_ok=True)
     
@@ -59,8 +60,9 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
     print('Final shape', input_data.shape)
 
     # Split data
-    split_num = 1
-    train_index, validation_index, test_index = get_split_index(split, input_data, data_targets, labels, split_num, filt_alt)
+    split_num = 3
+    print('split', split)
+    train_index, validation_index, test_index = get_split_index(split[0], input_data, data_targets, labels, split_num, filt_alt)
     validation_input = input_data[validation_index, :] / 255.0  # Normalize inputs
     validation_target = data_targets[validation_index]
     test_input = input_data[test_index, :] / 255.0  # Normalize inputs
@@ -134,7 +136,7 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
      
     
     # Early Stopping parameters
-    patience = 10  # Number of epochs with no improvement before stopping
+    patience = 30  # Number of epochs with no improvement before stopping
     min_delta = 1e-4  # Minimum improvement required to consider progress
     best_val_loss = float('inf')  # Best observed validation loss
     wait = 0  # Counter for epochs without improvement
@@ -233,18 +235,19 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
     errors_df["error"] = errors_df["error"].apply(lambda x: x[0] if len(x) == 1 else x)
     print('Done training!')
 
-    errors_df.to_csv(f'../official_results/error_logs/{model_name}_exp_{num}.csv',index=False)
+    errors_df.to_csv(f'../official_results/error_logs/{model_name}_exp_{num}_split_{split_num}.csv',index=False)
 
     # Plot training curve
+    num_final_epochs = epoch + 1
     plt.figure(figsize=(10, 5))
-    plt.plot(range(1, epochs + 1), loss_per_epoch, label='Training Loss')
-    plt.plot(range(1, epochs + 1), val_loss_per_epoch, label='Validation Loss')
+    plt.plot(range(1, num_final_epochs + 1), loss_per_epoch, label='Training Loss')
+    plt.plot(range(1, num_final_epochs + 1), val_loss_per_epoch, label='Validation Loss')
     plt.title("Training and Validation Loss Curve")
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
     plt.legend()
     fig1 = plt.gcf()
-    fig1.savefig(f"../official_results/learning_curves/{model_name}_exp_{num}.png", dpi=100) 
+    fig1.savefig(f"../official_results/learning_curves/{model_name}_exp_{num}_split_{split_num}.png", dpi=100) 
     plt.close(fig1)
     
     # Evaluate results
@@ -261,13 +264,13 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
     
     # Save model results
     opt = 'Adam' #SGD
-    laabeel = 'month, discharge, lat, lon, ADAM' if conditioned else None
+    laabeel = 'month, discharge, lat, lon' if conditioned else None
     var_inputs = '' if inputs == None else ', '.join(inputs)
     variables = ', '.join([var_inputs, laabeel]) if conditioned else var_inputs
     details = {'Experiment':num,'RMSE':rmse_test,'Variables':variables,'Input': f'{len(np.unique(labels))} cells', 'Split': split[0], \
-               'Split_id': split_num,'Optimizer': opt,'nº samples': len(data_targets), 'Batch size': batch_size, 'Epochs': epochs,\
-               'Date':current_date,'Time':current_time, 'Duration': duration, 'Loss':  'Physics-guided' if physics_guided else 'RMSE', \
-               'Resolution':W}
+               'Split_id': split_num,'Optimizer': opt,'nº samples': len(data_targets), 'Batch size': batch_size, \
+               'Epochs': f'{num_final_epochs} of {epochs}','Date':current_date,'Time':current_time, 'Duration': duration, \
+               'Loss':  'Physics-guided' if physics_guided else 'RMSE', 'Resolution':W}
     
     file_path = f"../official_results/{model_name}_results.xlsx"
     save_excel(file_path, details, excel = 'Results')
@@ -324,12 +327,15 @@ if __name__ == '__main__':
     W=W,
     time_split=True if split=='time' else False)
     
+    exp_num = len(os.listdir('../official_results/error_logs'))
+    
 
     # Run experiments with parameter combinations
     for model_name in model_names:
         for batch_size in batch_sizes:
             for epochs in epochs_list:
                 run_experiment(data, model_name, batch_size, epochs, W=W, conditioned=False, inputs=inputs, split=split, physics_guided=True, \
-                               filt_alt=filt_alt)
-                run_experiment(data, model_name, batch_size, epochs, W=W, conditioned=True, inputs=inputs, split=split, physics_guided=False, \
-                              filt_alt=filt_alt)
+                               filt_alt=filt_alt, num = exp_num)
+                run_experiment(data, model_name, batch_size, epochs, W=W, conditioned=False, inputs=inputs, split=split, physics_guided=False, \
+                              filt_alt=filt_alt, num = exp_num+1)
+                exp_num += 1

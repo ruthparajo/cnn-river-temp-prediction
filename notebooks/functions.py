@@ -15,6 +15,7 @@ from sklearn.model_selection import train_test_split
 import geopandas as gpd
 import tensorflow as tf
 import cv2
+import json
 
 
 def load_raster(filepath,rgb = True):
@@ -708,6 +709,7 @@ def get_split_index(split, input_data, data_targets, labels, split_id=None,filt_
         test_index = indices[train_size + val_size:]             # Últimos índices para prueba
        
     elif split == 'stratified':
+        print('yes !!!!!!!!!!')
         split_folder = f"../data/external/splits_low_alt/split_{split_id}_indices.json" if filt_alt else \
                         f"../data/external/splits/split_{split_id}_indices.json"
         with open(split_folder, 'r') as f:
