@@ -407,8 +407,11 @@ def load_river_raster(filepath):
     name = filepath.split('/')[-1].split('.')[0].split('bw_')[-1]
     return name, r
 
-def get_rivers_altitude(source_folder):
+def get_rivers_altitude(source_folder, filt):
     rivs=[]
+    all_x =[]
+    all_y=[]
+    all_z=[]
     with rasterio.open('../../../../../data/simon.walther/swissAltitude/swissAltitude.vrt') as src:
         for f in os.listdir(source_folder):
             if os.path.join(source_folder, f).endswith('shp'):
@@ -424,10 +427,20 @@ def get_rivers_altitude(source_folder):
                         window = Window(col_off=col, row_off=row, width=1, height=1)
                         pixel_value = src.read(1, window=window)
                         z_coords.append(pixel_value[0][0])
-                        
-                if np.mean(z_coords) <= 800:
+                       
+                if filt and np.mean(z_coords) <= 800:
                     rivs.append(f.split('station_')[-1].split('.')[0])
-    return rivs
+                    all_x.append(x_coords)
+                    all_y.append(y_coords)
+                    all_z.append(z_coords)
+                elif not filt:
+                    rivs.append(f.split('station_')[-1].split('.')[0])
+                    all_x.append(x_coords)
+                    all_y.append(y_coords)
+                    all_z.append(z_coords)
+                    
+                
+    return rivs, all_x, all_y, all_z
 
 # Function to compute Grad-CAM
 def make_gradcam_heatmap(img_array, model, last_conv_layer_name, pred_index=None):
@@ -515,3 +528,206 @@ def save_grad_map(val_input_gradients, image_path,impact_channel):
     plt.title(f"Impacto del canal {impact_channel} en validación")
     plt.savefig(image_path, dpi=300, bbox_inches='tight')
     plt.close()
+
+
+def load_all_data(
+    source_folder='../data/external/shp/river_cells_oficial',
+    source_path='../data/preprocessed/',
+    data_paths=['lst', 'slope', 'discharge', 'ndvi', 'altitude'],
+    filter_altitude=None,
+    W=256,
+    time_split=False,
+):
+    
+    dir_paths = [os.path.join(source_path, p) for p in data_paths]
+    
+    all_dir_paths = {k: [] for k in data_paths}
+    total_data = {}
+    total_times = {}
+
+    rivers = get_rivers_altitude(source_folder,filter_altitude)[0]
+    
+    # Cargar rutas de entrada
+    for i, dir_p in enumerate(dir_paths):
+        for subdir, dirs, files in os.walk(dir_p):
+            if subdir != dir_p and not subdir.endswith('masked') and not subdir.endswith('.ipynb_checkpoints') and subdir.split('/')[-1] in rivers:
+                all_dir_paths[data_paths[i]].append(subdir)
+            elif dir_p.endswith('altitude'):
+                all_dir_paths[data_paths[i]].extend([f for f in files if f.split('.')[0] in rivers])
+      
+    # Cargar datos de entrada
+    
+    for k, v in all_dir_paths.items():
+        if k not in ['direction', 'slope', 'altitude']:
+            labels = []
+            list_rgb = [True] * len(v) if k in ['lst', 'masked'] else [False] * len(v)
+            data, times = load_data(v, W, list_rgb)
+            if k != 'masked':
+                for ki in data.keys():
+                    labels += [ki.split('/')[-1]] * len(data[ki])
+
+            data_values = [np.array(img) for sublist in list(data.values()) for img in sublist]
+            times_list = [t for sublist in times for t in sublist]
+
+            if time_split:
+                dates = [datetime.strptime(date, '%Y-%m') for date in times_list]
+                pairs = sorted(zip(dates, data_values, labels), key=lambda x: x[0])
+                sorted_dates, data_values, labels = zip(*pairs)
+                times_list = [date.strftime('%Y-%m') for date in sorted_dates]
+
+            total_data[k] = np.array(data_values)
+            total_times[k] = times_list
+            print(f"{k} : {total_data[k].shape}")
+
+    # Cargar variables adicionales
+    for k, v in all_dir_paths.items():
+        if k in ['direction', 'slope', 'altitude']:
+            imgss = {}
+            total = []
+            for i, lab in enumerate(labels):
+                for file in v:
+                    if lab in file.split('/')[-1] or lab in file.split('.')[0]:
+                        if lab not in imgss:
+                            file_path = os.path.join(file, os.listdir(file)[0]) if k != 'altitude' else os.path.join('../data/preprocessed/altitude', file)
+                            r, m = load_raster(file_path, False)
+                            var = resize_image(r, W, W)
+                            var = np.where(np.isnan(var), 0.0, var)
+                            imgss[lab] = var
+                        else:
+                            var = imgss[lab]
+                            
+                total.append(var)
+
+            total_data[k] = np.array(total)
+            print(f"{k}: {np.array(total).shape}")
+
+    # Cargar variable objetivo
+    water_temp = pd.read_csv('../data/preprocessed/wt/water_temp.csv', index_col=0)
+    times_ordered = total_times['lst']
+    wt_temp = []
+    for cell, date in zip(labels, times_ordered):
+        temp = water_temp[(water_temp["Cell"] == cell) & (water_temp["Date"] == date)]["WaterTemp"]
+        if not temp.empty:
+            wt_temp.append(temp.values[0])
+    data_targets = np.array(wt_temp)
+
+    return total_data, total_times, data_targets, labels
+
+def get_results(test_target, test_prediction, rivers, labels, test_index):
+    mean_results = {k:[] for k in results.keys()}
+    # Loop through each sample and compute the MSE for that sample
+    for i in range(test_target.shape[0]):
+        # Flatten the true and predicted values for this sample
+        riv = rivers[labels[test_index[i]]].flatten()
+        y_true_flatten = test_target[i].flatten()
+        y_true_mask = y_true_flatten[riv != 0]
+        y_pred_flatten = test_prediction[i].flatten()
+        y_pred_mask = y_pred_flatten[riv != 0]
+        # Calculate metrics
+        res = evaluate_model(y_true_mask, y_pred_mask)
+        for k,v in res.items():
+            mean_results[k].append(v)
+    for key in mean_results:
+        mean_results[key] = np.mean(mean_results[key])
+    return mean_results
+
+
+def get_months_vectorized(times):
+    """
+    Calculate the cosine and sine values for each month in a given list of dates.
+    Additionally, return a dictionary that maps each unique cosine value to its corresponding month.
+    
+    Parameters:
+    ----------
+    times : list or array-like
+        A list of date strings or datetime objects from which month information is extracted.
+        
+    Returns:
+    -------
+    cosine_months : np.ndarray
+        An array of cosine values corresponding to each month in the `times` input.
+        
+    sine_months : np.ndarray
+        An array of sine values corresponding to each month in the `times` input.
+        
+    cos_to_month : dict
+        A dictionary where each key is a unique cosine value and the corresponding value is the month (1-12) 
+        associated with that cosine value."""
+    
+    month_cosine_dict = {month: np.cos((month - 1) / 12 * 2 * np.pi) for month in range(1, 13)}
+    month_sinus_dict = {month: np.sin((month - 1) / 12 * 2 * np.pi) for month in range(1, 13)}
+    
+    cos_to_month = {cos_val: month for month, cos_val in month_cosine_dict.items()}
+    
+    def cosine_for_month(month):
+        return month_cosine_dict[month]
+
+    def sine_for_month(month):
+        return month_sinus_dict[month]
+
+    cosine_vectorized = np.vectorize(cosine_for_month)
+    sine_vectorized = np.vectorize(sine_for_month)
+
+    times_dt = pd.to_datetime(times)
+    months = times_dt.month
+
+    cosine_months = cosine_vectorized(months)
+    sine_months = sine_vectorized(months)
+    
+    return cosine_months, sine_months, cos_to_month
+
+def get_lat_lon(labels):
+    file_path = '../data/raw/wt/cell_coordinates_oficial.csv'
+    lat_lon = pd.read_csv(file_path)
+    lats=[]
+    lons=[]
+    for label in labels:
+        num_cell = int(label.split('_')[-1])
+        lat = lat_lon[lat_lon.Cell==num_cell].Latitude.values[0]
+        lon = lat_lon[lat_lon.Cell==num_cell].Longitude.values[0]
+        lats.append(lat)
+        lons.append(lon)
+    lats = np.array(lats)
+    lons = np.array(lons)
+    return lats, lons
+
+def get_split_index(split, input_data, data_targets, labels, split_id=None,filt_alt=None):
+    if split == 'time':
+        train_ratio = 0.6
+        val_ratio = 0.2
+        test_ratio = 0.2
+        
+        # Calcular el tamaño de cada conjunto
+        total_images = len(input_data)
+        train_size = int(total_images * train_ratio)
+        val_size = int(total_images * val_ratio)
+        indices = np.arange(total_images)
+        
+        train_index = indices[:train_size]                       # Primeros índices para entrenamiento
+        validation_index = indices[train_size:train_size + val_size]    # Siguientes índices para validación
+        test_index = indices[train_size + val_size:]             # Últimos índices para prueba
+       
+    elif split == 'stratified':
+        split_folder = f"../data/external/splits_low_alt/split_{split_id}_indices.json" if filt_alt else \
+                        f"../data/external/splits/split_{split_id}_indices.json"
+        with open(split_folder, 'r') as f:
+            loaded_indices = json.load(f)
+        train_index = loaded_indices['train']
+        validation_index = loaded_indices['val']
+        test_index = loaded_indices['test']
+        #train_index, validation_index, test_index = split_data_stratified(input_data, data_targets, labels)
+    else:
+        train_index, validation_index, test_index = split_data(input_data, data_targets)
+        
+    return train_index, validation_index, test_index
+            
+def get_discharge(labels, times_ordered):
+    discharge = pd.read_csv('../data/preprocessed/discharge/discharge.csv', index_col=0)
+    disch = []
+    for cell, date in zip(labels, times_ordered):
+        value = discharge[(discharge["Cell"] == cell) & (discharge["Date"] == date)]["Discharge"]
+        if not value.empty:
+            disch.append(value.values[0])
+    disch = np.array(disch)
+    return disch
+

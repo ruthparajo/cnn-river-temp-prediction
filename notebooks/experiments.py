@@ -30,207 +30,12 @@ gpus = tf.config.experimental.list_physical_devices('GPU')
 for gpu in gpus:
     tf.config.experimental.set_memory_growth(gpu, True)
 
-def load_all_data(
-    source_folder='../data/external/shp/river_cells_oficial',
-    source_path='../data/preprocessed/',
-    data_paths=['lst', 'slope', 'discharge', 'ndvi', 'altitude'],
-    filter_altitude=None,
-    W=256,
-    time_split=False,
-):
-    
-    dir_paths = [os.path.join(source_path, p) for p in data_paths]
-    
-    all_dir_paths = {k: [] for k in data_paths}
-    total_data = {}
-    total_times = {}
 
-    if not filter_altitude:
-        rivers = [f.split('station_')[-1].split('.')[0] for f in os.listdir(source_folder) if os.path.join(source_folder, f).endswith('shp')]
-    else:
-        rivers = get_rivers_altitude(source_folder)
-    
-    # Cargar rutas de entrada
-    for i, dir_p in enumerate(dir_paths):
-        for subdir, dirs, files in os.walk(dir_p):
-            if subdir != dir_p and not subdir.endswith('masked') and not subdir.endswith('.ipynb_checkpoints') and subdir.split('/')[-1] in rivers:
-                all_dir_paths[data_paths[i]].append(subdir)
-            elif dir_p.endswith('altitude'):
-                all_dir_paths[data_paths[i]].extend([f for f in files if f.split('.')[0] in rivers])
-      
-    # Cargar datos de entrada
-    
-    for k, v in all_dir_paths.items():
-        if k not in ['discharge', 'slope', 'altitude']:
-            labels = []
-            list_rgb = [True] * len(v) if k in ['lst', 'masked'] else [False] * len(v)
-            data, times = load_data(v, W, list_rgb)
-            if k != 'masked':
-                for ki in data.keys():
-                    labels += [ki.split('/')[-1]] * len(data[ki])
-
-            data_values = [np.array(img) for sublist in list(data.values()) for img in sublist]
-            times_list = [t for sublist in times for t in sublist]
-
-            if time_split:
-                dates = [datetime.strptime(date, '%Y-%m') for date in times_list]
-                pairs = sorted(zip(dates, data_values, labels), key=lambda x: x[0])
-                sorted_dates, data_values, labels = zip(*pairs)
-                times_list = [date.strftime('%Y-%m') for date in sorted_dates]
-
-            total_data[k] = np.array(data_values)
-            total_times[k] = times_list
-            print(f"{k} : {total_data[k].shape}")
-
-    # Cargar variables adicionales
-    for k, v in all_dir_paths.items():
-        if k in ['discharge', 'slope', 'altitude']:
-            imgss = {}
-            total = []
-            for i, lab in enumerate(labels):
-                for file in v:
-                    if lab in file.split('/')[-1] or lab in file.split('.')[0]:
-                        if lab not in imgss:
-                            file_path = os.path.join(file, os.listdir(file)[0]) if k != 'altitude' else os.path.join('../data/preprocessed/altitude', file)
-                            r, m = load_raster(file_path, False)
-                            var = resize_image(r, W, W)
-                            var = np.where(np.isnan(var), 0.0, var)
-                            imgss[lab] = var
-                        else:
-                            var = imgss[lab]
-                            
-                total.append(var)
-
-            total_data[k] = np.array(total)
-            print(f"{k}: {np.array(total).shape}")
-
-    # Cargar variable objetivo
-    water_temp = pd.read_csv('../data/preprocessed/wt/water_temp.csv', index_col=0)
-    times_ordered = total_times['lst']
-    wt_temp = []
-    for cell, date in zip(labels, times_ordered):
-        temp = water_temp[(water_temp["Cell"] == cell) & (water_temp["Date"] == date)]["WaterTemp"]
-        if not temp.empty:
-            wt_temp.append(temp.values[0])
-    data_targets = np.array(wt_temp)
-
-    return total_data, total_times, data_targets, labels
-
-def get_results(test_target, test_prediction, rivers, labels, test_index):
-    mean_results = {k:[] for k in results.keys()}
-    # Loop through each sample and compute the MSE for that sample
-    for i in range(test_target.shape[0]):
-        # Flatten the true and predicted values for this sample
-        riv = rivers[labels[test_index[i]]].flatten()
-        y_true_flatten = test_target[i].flatten()
-        y_true_mask = y_true_flatten[riv != 0]
-        y_pred_flatten = test_prediction[i].flatten()
-        y_pred_mask = y_pred_flatten[riv != 0]
-        # Calculate metrics
-        res = evaluate_model(y_true_mask, y_pred_mask)
-        for k,v in res.items():
-            mean_results[k].append(v)
-    for key in mean_results:
-        mean_results[key] = np.mean(mean_results[key])
-    return mean_results
-
-
-def get_months_vectorized(times):
-    """
-    Calculate the cosine and sine values for each month in a given list of dates.
-    Additionally, return a dictionary that maps each unique cosine value to its corresponding month.
-    
-    Parameters:
-    ----------
-    times : list or array-like
-        A list of date strings or datetime objects from which month information is extracted.
-        
-    Returns:
-    -------
-    cosine_months : np.ndarray
-        An array of cosine values corresponding to each month in the `times` input.
-        
-    sine_months : np.ndarray
-        An array of sine values corresponding to each month in the `times` input.
-        
-    cos_to_month : dict
-        A dictionary where each key is a unique cosine value and the corresponding value is the month (1-12) 
-        associated with that cosine value."""
-    
-    month_cosine_dict = {month: np.cos((month - 1) / 12 * 2 * np.pi) for month in range(1, 13)}
-    month_sinus_dict = {month: np.sin((month - 1) / 12 * 2 * np.pi) for month in range(1, 13)}
-    
-    cos_to_month = {cos_val: month for month, cos_val in month_cosine_dict.items()}
-    
-    def cosine_for_month(month):
-        return month_cosine_dict[month]
-
-    def sine_for_month(month):
-        return month_sinus_dict[month]
-
-    cosine_vectorized = np.vectorize(cosine_for_month)
-    sine_vectorized = np.vectorize(sine_for_month)
-
-    times_dt = pd.to_datetime(times)
-    months = times_dt.month
-
-    cosine_months = cosine_vectorized(months)
-    sine_months = sine_vectorized(months)
-    
-    return cosine_months, sine_months, cos_to_month
-
-def get_lat_lon(labels):
-    file_path = '../data/raw/wt/cell_coordinates_oficial.csv'
-    lat_lon = pd.read_csv(file_path)
-    lats=[]
-    lons=[]
-    for label in labels:
-        num_cell = int(label.split('_')[-1])
-        lat = lat_lon[lat_lon.Cell==num_cell].Latitude.values[0]
-        lon = lat_lon[lat_lon.Cell==num_cell].Longitude.values[0]
-        lats.append(lat)
-        lons.append(lon)
-    lats = np.array(lats)
-    lons = np.array(lons)
-    return lats, lons
-
-def get_split_index(split, input_data, data_targets, labels):
-    if split == 'time':
-        train_ratio = 0.6
-        val_ratio = 0.2
-        test_ratio = 0.2
-        
-        # Calcular el tamaño de cada conjunto
-        total_images = len(input_data)
-        train_size = int(total_images * train_ratio)
-        val_size = int(total_images * val_ratio)
-        indices = np.arange(total_images)
-        
-        train_index = indices[:train_size]                       # Primeros índices para entrenamiento
-        validation_index = indices[train_size:train_size + val_size]    # Siguientes índices para validación
-        test_index = indices[train_size + val_size:]             # Últimos índices para prueba
-       
-    elif split == 'stratified':
-        train_index, validation_index, test_index = split_data_stratified(input_data, data_targets, labels)
-    else:
-        train_index, validation_index, test_index = split_data(input_data, data_targets)
-        
-    return train_index, validation_index, test_index
-            
-def get_discharge(labels, times_ordered):
-    discharge = pd.read_csv('../data/preprocessed/discharge/discharge.csv', index_col=0)
-    disch = []
-    for cell, date in zip(labels, times_ordered):
-        value = discharge[(discharge["Cell"] == cell) & (discharge["Date"] == date)]["Discharge"]
-        if not value.empty:
-            disch.append(value.values[0])
-    disch = np.array(disch)
-    return disch
-
-def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=False, inputs=None, split=None, physics_guided=None):
+def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=False, inputs=None, split=None, physics_guided=None, filt_alt=None):
 
     print(f"Running experiment with model={model_name}, batch_size={batch_size}, epochs={epochs}, inputs = {inputs}")
-    
+
+    # Gather input and target data 
     total_data, total_times, data_targets, labels = data
     cosine_months, sine_months, cos_to_month = get_months_vectorized(total_times['lst'])
     lat, lon = get_lat_lon(labels)
@@ -254,7 +59,8 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
     print('Final shape', input_data.shape)
 
     # Split data
-    train_index, validation_index, test_index = get_split_index(split, input_data, data_targets, labels)
+    split_num = 1
+    train_index, validation_index, test_index = get_split_index(split, input_data, data_targets, labels, split_num, filt_alt)
     validation_input = input_data[validation_index, :] / 255.0  # Normalize inputs
     validation_target = data_targets[validation_index]
     test_input = input_data[test_index, :] / 255.0  # Normalize inputs
@@ -288,9 +94,9 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
     start_time = time.time()
     if model_name == "baseline_CNN":
         if conditioned:
-            model = build_cnn_model_features2(input_args[0], input_args[1])
+            model = build_cnn_model_features(input_args[0], input_args[1])
         else:
-            model = build_cnn_baseline2(input_args)
+            model = build_cnn_baseline(input_args)
     elif model_name == 'CNN':
         model = build_cnn_model(input_args)
     elif model_name == 'img_2_img':
@@ -326,6 +132,13 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
             last_conv_layer_name = layer.name
             break
      
+    
+    # Early Stopping parameters
+    patience = 10  # Number of epochs with no improvement before stopping
+    min_delta = 1e-4  # Minimum improvement required to consider progress
+    best_val_loss = float('inf')  # Best observed validation loss
+    wait = 0  # Counter for epochs without improvement
+
     # Train model
     for epoch in range(epochs):
         epoch_loss = 0  
@@ -336,10 +149,13 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
                 model_input_batch = batch[:-1]  
                 target_batch = batch[-1]        
             else:
-                model_input_batch, target_batch = batch  # Desempaquetado directo para un solo dataset
+                model_input_batch, target_batch = batch  # Direct unpacking for a single dataset
             
             with tf.GradientTape() as tape:
+                # Forward pass
                 y_pred = model([*model_input_batch], training=True) if conditioned else model(model_input_batch, training=True)
+                
+                # Compute loss based on the selected method
                 if physics_guided:
                     lst_batch = model_input_batch[0][:, :, :, :3] if conditioned else model_input_batch[:, :, :, :3]
                     loss = conservation_energy_loss(target_batch, y_pred, lst_batch, alpha=0.5, beta=0.5)
@@ -349,7 +165,7 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
             # Calculate gradients and apply optimization
             gradients = tape.gradient(loss, model.trainable_variables)
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
-
+    
             epoch_loss += loss.numpy()
             num_batches += 1
             
@@ -360,6 +176,7 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
             current_batch_size = y_true.shape[0]
             batch_cosine_values = additional_inputs_train[:, 0][start_idx:start_idx + current_batch_size]
         
+            # Log RMSE values for each prediction
             for cos, pred, true in zip(batch_cosine_values, y_pred, y_true):
                 squared_error = tf.square(pred - true) 
                 rmse_sample = tf.sqrt(squared_error)  # RMSE 
@@ -371,15 +188,17 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
                 
         avg_epoch_loss = epoch_loss / num_batches
         loss_per_epoch.append(avg_epoch_loss)
+        
+        # Validation loss
         val_loss = 0
         val_batches = 0
         
         for val_batch in dataset_val:
             if conditioned:
-                val_input_batch = batch[:-1]  
-                val_target_batch = batch[-1]        
+                val_input_batch = val_batch[:-1]  
+                val_target_batch = val_batch[-1]        
             else:
-                val_input_batch, val_target_batch = batch
+                val_input_batch, val_target_batch = val_batch
             
             val_pred = model([*val_input_batch], training=False) if conditioned else model(val_input_batch, training=False)
             val_loss += root_mean_squared_error(val_target_batch, val_pred).numpy()
@@ -389,15 +208,34 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
         val_loss_per_epoch.append(avg_val_loss)
     
         print(f"Epoch {epoch + 1}/{epochs} - Loss: {avg_epoch_loss:.4f} - Val Loss: {avg_val_loss:.4f}")
-        gc.collect()
+    
+        # Early Stopping Logic
+        if avg_val_loss < best_val_loss - min_delta:
+            # Update the best validation loss and reset patience counter
+            best_val_loss = avg_val_loss
+            wait = 0  
+            print(f"Validation loss improved to {best_val_loss:.4f}.")
+        else:
+            # Increment patience counter
+            wait += 1
+            print(f"No improvement in validation loss for {wait} epochs.")
+            if wait >= patience:
+                # Stop training if patience threshold is exceeded
+                print(f"Stopping early at epoch {epoch + 1}.")
+                break
+        
+        gc.collect()  # Free up memory after each epoch
+    
+
 
     # Convert the error log to a DataFrame for further analysis
     errors_df = pd.DataFrame(errors_log)
     errors_df["error"] = errors_df["error"].apply(lambda x: x[0] if len(x) == 1 else x)
     print('Done training!')
 
-    errors_df.to_csv(f'../results/error_logs/{model_name}_exp_{num}.csv',index=False)
+    errors_df.to_csv(f'../official_results/error_logs/{model_name}_exp_{num}.csv',index=False)
 
+    # Plot training curve
     plt.figure(figsize=(10, 5))
     plt.plot(range(1, epochs + 1), loss_per_epoch, label='Training Loss')
     plt.plot(range(1, epochs + 1), val_loss_per_epoch, label='Validation Loss')
@@ -406,7 +244,7 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
     plt.ylabel("Loss")
     plt.legend()
     fig1 = plt.gcf()
-    fig1.savefig(f"../results/learning_curves/{model_name}_exp_{num}.png", dpi=100) 
+    fig1.savefig(f"../official_results/learning_curves/{model_name}_exp_{num}.png", dpi=100) 
     plt.close(fig1)
     
     # Evaluate results
@@ -422,14 +260,16 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
     current_time = datetime.now().strftime("%H:%M:%S")
     
     # Save model results
+    opt = 'Adam' #SGD
     laabeel = 'month, discharge, lat, lon, ADAM' if conditioned else None
     var_inputs = '' if inputs == None else ', '.join(inputs)
     variables = ', '.join([var_inputs, laabeel]) if conditioned else var_inputs
-    details = {'Experiment':num,'RMSE':rmse_test,'Variables':variables,'Input': f'{len(np.unique(labels))} rivers', 'Split': split[0], \
-               'nº samples': len(data_targets), 'Batch size': batch_size, 'Epochs': epochs, 'Date':current_date, \
-               'Time':current_time, 'Duration': duration, 'Loss':  'Physics-guided' if physics_guided else 'RMSE', 'Resolution':W}
+    details = {'Experiment':num,'RMSE':rmse_test,'Variables':variables,'Input': f'{len(np.unique(labels))} cells', 'Split': split[0], \
+               'Split_id': split_num,'Optimizer': opt,'nº samples': len(data_targets), 'Batch size': batch_size, 'Epochs': epochs,\
+               'Date':current_date,'Time':current_time, 'Duration': duration, 'Loss':  'Physics-guided' if physics_guided else 'RMSE', \
+               'Resolution':W}
     
-    file_path = f"../results/{model_name}_results.xlsx"
+    file_path = f"../official_results/{model_name}_results.xlsx"
     save_excel(file_path, details, excel = 'Results')
     print(model.summary())
     if conditioned:
@@ -474,12 +314,13 @@ if __name__ == '__main__':
         data_folder = '../data/preprocessed/'
     else:
         data_folder = '../data/preprocessed/64x64/'
+    filt_alt = False 
     
     data = load_all_data(
     source_folder='../data/external/shp/river_cells_oficial',
     source_path=data_folder,
     data_paths= inputs,
-    filter_altitude=False,
+    filter_altitude=filt_alt,
     W=W,
     time_split=True if split=='time' else False)
     
@@ -488,9 +329,7 @@ if __name__ == '__main__':
     for model_name in model_names:
         for batch_size in batch_sizes:
             for epochs in epochs_list:
-                #run_experiment(data, model_name, batch_size, epochs, W=W, conditioned=False, inputs=inputs, split=split, physics_guided=True)
-                run_experiment(data, model_name, batch_size, epochs, W=W, conditioned=True, inputs=inputs, split=split, physics_guided=False)
-                
-
-                
-
+                run_experiment(data, model_name, batch_size, epochs, W=W, conditioned=False, inputs=inputs, split=split, physics_guided=True, \
+                               filt_alt=filt_alt)
+                run_experiment(data, model_name, batch_size, epochs, W=W, conditioned=True, inputs=inputs, split=split, physics_guided=False, \
+                              filt_alt=filt_alt)
