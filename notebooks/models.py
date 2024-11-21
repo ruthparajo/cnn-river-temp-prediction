@@ -39,6 +39,39 @@ def build_cnn_baseline(input_shape):
     return model
 
 
+def build_cnn_baseline_8x8(input_shape):
+    model = models.Sequential()
+
+    # Capa 1: Convolucional + Batch Normalization + Leaky ReLU + Max Pooling
+    model.add(layers.Conv2D(16, (3, 3), padding='same', input_shape=input_shape))
+    model.add(layers.LeakyReLU(alpha=0.1))
+    model.add(layers.BatchNormalization())
+    model.add(layers.MaxPooling2D((2, 2)))  # Reduce de 8x8 a 4x4
+
+    # Capa 2: Convolucional + Batch Normalization + Leaky ReLU + Max Pooling
+    model.add(layers.Conv2D(32, (3, 3), padding='same'))
+    model.add(layers.LeakyReLU(alpha=0.1))
+    model.add(layers.BatchNormalization())
+    model.add(layers.MaxPooling2D((2, 2)))  # Reduce de 4x4 a 2x2
+
+    # Opcional: Otra capa convolucional si se requiere más profundidad
+    model.add(layers.Conv2D(64, (3, 3), padding='same'))
+    model.add(layers.LeakyReLU(alpha=0.1))
+    model.add(layers.BatchNormalization())
+
+    # Global Average Pooling en lugar de Flatten
+    model.add(layers.GlobalAveragePooling2D())
+
+    # Capas densas con Dropout reducido
+    model.add(layers.Dense(64, activation='relu', kernel_regularizer=regularizers.l2(0.0001)))
+    model.add(layers.Dropout(0.2))  # Dropout reducido
+
+    # Capa de salida
+    model.add(layers.Dense(1, activation='linear'))
+
+    return model
+
+
 def build_cnn_model_features(input_shape, additional_inputs_shape):
     # Entrada de imagen (7 canales, como en tu configuración actual)
     image_input = Input(shape=input_shape, name="Image_Input")
@@ -56,6 +89,53 @@ def build_cnn_model_features(input_shape, additional_inputs_shape):
     x = layers.MaxPooling2D((2, 2))(x)
 
     x = layers.Conv2D(64, (3, 3), kernel_regularizer=regularizers.l2(0.0001))(x)
+    x = layers.LeakyReLU(alpha=0.1)(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.MaxPooling2D((2, 2))(x)
+
+    # Global Average Pooling para reducir la dimensionalidad de la imagen
+    x = layers.GlobalAveragePooling2D()(x)
+
+    # Entrada de características adicionales (vectores)
+    additional_features_input = Input(shape=(additional_inputs_shape,), name="Additional_Features_Input")
+
+    # Procesamiento de los inputs adicionales
+    y = layers.Dense(32, activation='relu')(additional_features_input)
+    y = layers.BatchNormalization()(y)
+    y = layers.Dropout(0.2)(y)  # Regularización
+
+    # Concatenación de las dos ramas
+    combined = concatenate([x, y])
+
+    # Capas densas finales después de la concatenación
+    combined = layers.Dense(64, activation='relu', kernel_regularizer=regularizers.l2(0.0001))(combined)
+    combined = layers.Dropout(0.2)(combined)
+
+    # Capa de salida con una sola neurona para la predicción escalar
+    output = layers.Dense(1, activation='linear')(combined)
+
+    # Definición del modelo con ambas entradas
+    model = models.Model(inputs=[image_input, additional_features_input], outputs=output)
+
+    return model
+
+def build_cnn_model_features_8x8(input_shape, additional_inputs_shape):
+    # Entrada de imagen (7 canales, como en tu configuración actual)
+    image_input = Input(shape=input_shape, name="Image_Input")
+
+    # Rama de la imagen: Capas convolucionales
+    x = layers.Conv2D(16, (3, 3),  padding='same')(image_input) 
+    # x = layers.Conv2D(16, (3, 3), activation='relu', kernel_regularizer=regularizers.l2(0.001))(image_input)
+    x = layers.LeakyReLU(alpha=0.1)(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.MaxPooling2D((2, 2))(x)
+
+    x = layers.Conv2D(32, (3, 3), padding='same')(x)
+    x = layers.LeakyReLU(alpha=0.1)(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.MaxPooling2D((2, 2))(x)
+
+    x = layers.Conv2D(64, (3, 3), padding='same')(x)
     x = layers.LeakyReLU(alpha=0.1)(x)
     x = layers.BatchNormalization()(x)
     x = layers.MaxPooling2D((2, 2))(x)

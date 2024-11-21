@@ -22,6 +22,8 @@ import tensorflow as tf
 import io
 from contextlib import redirect_stdout
 import logging
+from tensorflow.keras.optimizers.schedules import ExponentialDecay
+
 
 logging.getLogger('tensorflow').setLevel(logging.ERROR)
 
@@ -32,7 +34,7 @@ for gpu in gpus:
 
 
 def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=False, inputs=None, split=None,\
-                   physics_guided=None, filt_alt=None, num=0):
+                   physics_guided=None, filt_alt=None, num=0, split_num=0):
 
     print(f"Running experiment with model={model_name}, batch_size={batch_size}, epochs={epochs}, inputs = {inputs}")
 
@@ -46,28 +48,43 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
     
     grad_output_folder = f'../plots/grad_cam/{model_name}/exp_{num}'
     os.makedirs(grad_output_folder, exist_ok=True)
+
+    # Calculate global min and max for each variable
+    global_ranges = {}
+    for inp in inputs:  # 'inputs' is the list of variable names
+        all_images = total_data[inp]  # Shape: (n, H, W) or (n, H, W, C) for the variable
+        global_min = np.min(all_images)
+        global_max = np.max(all_images)
+        global_ranges[inp] = (global_min, global_max)
+        print(f"Variable: {inp}, Min: {global_min}, Max: {global_max}")
     
-    # Adapt input shapes
-    inputs_d = [total_data[inp] for inp in inputs]
+    # Adapt input shapes and normalize
     expanded_images = []
-    for img in inputs_d:
-        if img.ndim == 3:  # Case where image is (n, 256, 256) (single-channel)
-            expanded_images.append(np.expand_dims(img, axis=-1))  # Expand to add an extra channel
-        elif img.ndim == 4:  # Case where image already has multiple channels (n, 256, 256, c)
-            expanded_images.append(img)  # Leave the image as it is
-    combined_input = np.concatenate(expanded_images, axis=-1) # Concatenate all images along the last axis (channels)
-    input_data = combined_input # The final combined input is stored in input_data
-    print('Final shape', input_data.shape)
+    for inp in inputs:  # Loop through each variable
+        all_images = total_data[inp]  # Get all images for the variable
+        min_val, max_val = global_ranges[inp]  # Get global min and max
+        
+        # Normalize all images for the current variable
+        normalized_images = normalize_min_max(all_images, min_val, max_val)
+        
+        # Adjust shape if necessary
+        if normalized_images.ndim == 3:  # Case where images are (n, H, W) (single-channel)
+            normalized_images = np.expand_dims(normalized_images, axis=-1)  # Add a channel dimension
+        
+        expanded_images.append(normalized_images)
+    
+    # Combine all normalized inputs along the last axis (channels)
+    combined_input = np.concatenate(expanded_images, axis=-1)  # Concatenate along channel axis
+    input_data = combined_input
 
     # Split data
-    split_num = 3
     print('split', split)
     train_index, validation_index, test_index = get_split_index(split[0], input_data, data_targets, labels, split_num, filt_alt)
-    validation_input = input_data[validation_index, :] / 255.0  # Normalize inputs
+    validation_input = input_data[validation_index, :] 
     validation_target = data_targets[validation_index]
-    test_input = input_data[test_index, :] / 255.0  # Normalize inputs
+    test_input = input_data[test_index, :]
     test_target = data_targets[test_index]
-    train_input = input_data[train_index, :] / 255.0  # Normalize inputs
+    train_input = input_data[train_index, :]
     train_target = data_targets[train_index]
     
     additional_inputs_train = additional_inputs[train_index, :]
@@ -93,10 +110,14 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
 
     
     # Start model
+    model = build_model_map(model_name, input_args, conditioned, W, train_input)
     start_time = time.time()
+    '''
     if model_name == "baseline_CNN":
         if conditioned:
             model = build_cnn_model_features(input_args[0], input_args[1])
+        elif W == 8 or W == 16:
+            model = build_cnn_baseline_8x8(input_args)
         else:
             model = build_cnn_baseline(input_args)
     elif model_name == 'CNN':
@@ -109,7 +130,7 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
         train_input = train_input[:, :, :, :3]
         model = build_transfer_model((W, W, 3))
     elif model_name == "img_wise_CNN_improved":
-        model = build_simplified_cnn_model_improved(input_args)
+        model = build_simplified_cnn_model_improved(input_args)'''
         
     summary_file = f"../models/{model_name}_summary.txt"
     with open(summary_file, "w") as f:
@@ -121,8 +142,10 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
     dataset = dataset.batch(batch_size).cache().prefetch(tf.data.AUTOTUNE)
     dataset_val = tf.data.Dataset.from_tensor_slices((*val_model_input, validation_target) if conditioned else (val_model_input, validation_target))
     dataset_val = dataset_val.batch(batch_size).cache().prefetch(tf.data.AUTOTUNE)
-    
-    #optimizer = tf.keras.optimizers.SGD()
+
+    #initial_lr = 0.01
+    #lr_schedule = ExponentialDecay(initial_lr, decay_steps=50, decay_rate=0.96, staircase=True)
+    #optimizer = tf.keras.optimizers.SGD(learning_rate=lr_schedule, momentum=0.9, nesterov=True)
     optimizer = tf.keras.optimizers.Adam()
     errors_log = {"epoch": [], "month": [], "error": []}
     loss_per_epoch = []
@@ -263,7 +286,7 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
     current_time = datetime.now().strftime("%H:%M:%S")
     
     # Save model results
-    opt = 'Adam' #SGD
+    opt = 'Adam'#'SGD w/ dynamic-lr, momentum 0.9 & nesterov'#'Adam' #SGD
     laabeel = 'month, discharge, lat, lon' if conditioned else None
     var_inputs = '' if inputs == None else ', '.join(inputs)
     variables = ', '.join([var_inputs, laabeel]) if conditioned else var_inputs
@@ -316,7 +339,7 @@ if __name__ == '__main__':
     if W==128:
         data_folder = '../data/preprocessed/'
     else:
-        data_folder = '../data/preprocessed/64x64/'
+        data_folder = f'../data/preprocessed/{W}x{W}/'
     filt_alt = False 
     
     data = load_all_data(
@@ -327,15 +350,19 @@ if __name__ == '__main__':
     W=W,
     time_split=True if split=='time' else False)
     
-    exp_num = len(os.listdir('../official_results/error_logs'))
-    
 
     # Run experiments with parameter combinations
     for model_name in model_names:
+        exp_num = get_next_experiment_number(f'../official_results/{model_name}_results.xlsx')
         for batch_size in batch_sizes:
             for epochs in epochs_list:
-                run_experiment(data, model_name, batch_size, epochs, W=W, conditioned=False, inputs=inputs, split=split, physics_guided=True, \
-                               filt_alt=filt_alt, num = exp_num)
-                run_experiment(data, model_name, batch_size, epochs, W=W, conditioned=False, inputs=inputs, split=split, physics_guided=False, \
-                              filt_alt=filt_alt, num = exp_num+1)
-                exp_num += 1
+                #run_experiment(data, model_name, batch_size, epochs, W=W, conditioned=False, inputs=inputs, split=split, physics_guided=True, \
+                               #filt_alt=filt_alt, num = exp_num)
+                for c in [True, False]:
+                    run_experiment(data, model_name, batch_size, epochs, W=W, conditioned=c, inputs=inputs, split=split, physics_guided=False, \
+                                  filt_alt=filt_alt, num = exp_num, split_num = 1)
+                    run_experiment(data, model_name, batch_size, epochs, W=W, conditioned=c, inputs=inputs, split=split, physics_guided=False, \
+                                  filt_alt=filt_alt, num = exp_num+1, split_num = 2)
+                    run_experiment(data, model_name, batch_size, epochs, W=W, conditioned=c, inputs=inputs, split=split, physics_guided=False, \
+                                  filt_alt=filt_alt, num = exp_num+2, split_num = 3)
+                    

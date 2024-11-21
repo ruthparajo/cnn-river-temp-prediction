@@ -16,6 +16,7 @@ import geopandas as gpd
 import tensorflow as tf
 import cv2
 import json
+from models import *
 
 
 def load_raster(filepath,rgb = True):
@@ -732,4 +733,49 @@ def get_discharge(labels, times_ordered):
             disch.append(value.values[0])
     disch = np.array(disch)
     return disch
+
+def get_next_experiment_number(file_path):
+    if not os.path.exists(file_path):
+        return 1 
+    df = pd.read_excel(file_path)
+    if df.empty:
+        return 1
+    return len(df) + 1
+
+def normalize_min_max(data, min_val, max_val):
+    """
+    Normalizes the data to the range [0, 1] based on global min and max.
+    
+    Parameters:
+    data (ndarray): Input data to normalize.
+    min_val (float): Minimum value for normalization.
+    max_val (float): Maximum value for normalization.
+    
+    Returns:
+    ndarray: Normalized data.
+    """
+    if min_val == max_val:
+        return np.zeros_like(data)  # Avoid division by zero
+    return (data - min_val) / (max_val - min_val)
+
+def build_model_map(model_name, input_args, conditioned, W, train_input=None):
+    model_map = {
+        "baseline_CNN": lambda: build_cnn_model_features(input_args[0], input_args[1]) if conditioned and W not in [8, 16] \
+                                else (build_cnn_baseline_8x8(input_args) if W in [8, 16] and not conditioned else \
+                                      (build_cnn_baseline(input_args) if not conditioned else \
+                                       build_cnn_model_features_8x8(input_args[0], input_args[1]))
+        ),
+        "CNN": lambda: build_cnn_model(input_args),
+        "img_2_img": lambda: build_img_2_img_model(input_args),
+        "UNet": lambda: build_unet(input_args),
+        "transfer_learning_VGG16": lambda: build_transfer_model((W, W, 3)),
+        "img_wise_CNN_improved": lambda: build_simplified_cnn_model_improved(input_args)
+    }
+
+    # Si el modelo requiere un preprocesamiento especial, como en transfer learning
+    if model_name == "transfer_learning_VGG16" and train_input is not None:
+        train_input = train_input[:, :, :, :3]  # Solo los primeros 3 canales para VGG16
+
+    # Obtener y devolver el modelo
+    return model_map.get(model_name, lambda: None)()  # Devuelve `None` si el modelo no existe
 
