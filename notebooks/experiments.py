@@ -51,8 +51,8 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
 
     # Calculate global min and max for each variable
     global_ranges = {}
-    for inp in inputs:  # 'inputs' is the list of variable names
-        all_images = total_data[inp]  # Shape: (n, H, W) or (n, H, W, C) for the variable
+    for inp in inputs:  
+        all_images = total_data[inp]  
         global_min = np.min(all_images)
         global_max = np.max(all_images)
         global_ranges[inp] = (global_min, global_max)
@@ -60,21 +60,14 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
     
     # Adapt input shapes and normalize
     expanded_images = []
-    for inp in inputs:  # Loop through each variable
-        all_images = total_data[inp]  # Get all images for the variable
-        min_val, max_val = global_ranges[inp]  # Get global min and max
-        
-        # Normalize all images for the current variable
+    for inp in inputs:  
+        all_images = total_data[inp]  
+        min_val, max_val = global_ranges[inp]  
         normalized_images = normalize_min_max(all_images, min_val, max_val)
-        
-        # Adjust shape if necessary
-        if normalized_images.ndim == 3:  # Case where images are (n, H, W) (single-channel)
-            normalized_images = np.expand_dims(normalized_images, axis=-1)  # Add a channel dimension
-        
+        if normalized_images.ndim == 3:  
+            normalized_images = np.expand_dims(normalized_images, axis=-1)  
         expanded_images.append(normalized_images)
-    
-    # Combine all normalized inputs along the last axis (channels)
-    combined_input = np.concatenate(expanded_images, axis=-1)  # Concatenate along channel axis
+    combined_input = np.concatenate(expanded_images, axis=-1)  
     input_data = combined_input
 
     # Split data
@@ -112,25 +105,6 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
     # Start model
     model = build_model_map(model_name, input_args, conditioned, W, train_input)
     start_time = time.time()
-    '''
-    if model_name == "baseline_CNN":
-        if conditioned:
-            model = build_cnn_model_features(input_args[0], input_args[1])
-        elif W == 8 or W == 16:
-            model = build_cnn_baseline_8x8(input_args)
-        else:
-            model = build_cnn_baseline(input_args)
-    elif model_name == 'CNN':
-        model = build_cnn_model(input_args)
-    elif model_name == 'img_2_img':
-        model = build_img_2_img_model(input_args)
-    elif model_name == 'UNet':
-        model = build_unet(input_args)
-    elif model_name == 'transfer_learning_VGG16':
-        train_input = train_input[:, :, :, :3]
-        model = build_transfer_model((W, W, 3))
-    elif model_name == "img_wise_CNN_improved":
-        model = build_simplified_cnn_model_improved(input_args)'''
         
     summary_file = f"../models/{model_name}_summary.txt"
     with open(summary_file, "w") as f:
@@ -297,6 +271,7 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
     
     file_path = f"../official_results/{model_name}_results.xlsx"
     save_excel(file_path, details, excel = 'Results')
+    #model.save(f'../models/{model_name}.h5')
     print(model.summary())
     if conditioned:
         print(f"Experiment {model_name} with batch_size={batch_size} and epochs={epochs} completed and {input_shape, additional_inputs.shape} inputs .\n")

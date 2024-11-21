@@ -523,13 +523,14 @@ def save_and_display_gradcam(img, heatmap, filename, alpha=0.4):
     print(f"Saved Grad-CAM to {filename}")
 
 def save_grad_map(val_input_gradients, image_path,impact_channel):
-    grad_map = val_input_gradients[0, :, :, impact_channel].numpy()  # Extraer gradiente de un canal
+    grad_map = val_input_gradients[0, :, :, impact_channel].numpy()  
     
     plt.imshow(grad_map, cmap="bwr")
     plt.colorbar()
     plt.title(f"Impacto del canal {impact_channel} en validación")
     plt.savefig(image_path, dpi=300, bbox_inches='tight')
     plt.close()
+    print('Saved at', image_path)
 
 
 def load_all_data(
