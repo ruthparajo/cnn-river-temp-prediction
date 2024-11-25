@@ -34,7 +34,7 @@ for gpu in gpus:
 
 
 def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=False, inputs=None, split=None,\
-                   physics_guided=None, filt_alt=None, num=0, split_num=0):
+                   physics_guided=None, filt_alt=None, num=0, split_num=0, augment= False):
 
     print(f"Running experiment with model={model_name}, batch_size={batch_size}, epochs={epochs}, inputs = {inputs}")
 
@@ -113,7 +113,15 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
     
     # Create batch dataset
     dataset = tf.data.Dataset.from_tensor_slices((*model_input, train_target) if conditioned else (model_input, train_target))
-    dataset = dataset.batch(batch_size).cache().prefetch(tf.data.AUTOTUNE)
+    if augment == True:
+        dataset = (dataset.map(augment_data, num_parallel_calls=tf.data.AUTOTUNE)  # Apply augmentation only here
+                    .batch(batch_size)
+                    .cache()
+                    .prefetch(tf.data.AUTOTUNE)
+                    )
+    else:
+        dataset = dataset.batch(batch_size).cache().prefetch(tf.data.AUTOTUNE)
+        
     dataset_val = tf.data.Dataset.from_tensor_slices((*val_model_input, validation_target) if conditioned else (val_model_input, validation_target))
     dataset_val = dataset_val.batch(batch_size).cache().prefetch(tf.data.AUTOTUNE)
 
@@ -315,7 +323,9 @@ if __name__ == '__main__':
         data_folder = '../data/preprocessed/'
     else:
         data_folder = f'../data/preprocessed/{W}x{W}/'
-    filt_alt = False 
+        
+    filt_alt = True 
+    augment = True
     
     data = load_all_data(
     source_folder='../data/external/shp/river_cells_oficial',
@@ -333,11 +343,11 @@ if __name__ == '__main__':
             for epochs in epochs_list:
                 #run_experiment(data, model_name, batch_size, epochs, W=W, conditioned=False, inputs=inputs, split=split, physics_guided=True, \
                                #filt_alt=filt_alt, num = exp_num)
-                for c in [True, False]:
-                    run_experiment(data, model_name, batch_size, epochs, W=W, conditioned=c, inputs=inputs, split=split, physics_guided=False, \
-                                  filt_alt=filt_alt, num = exp_num, split_num = 1)
-                    run_experiment(data, model_name, batch_size, epochs, W=W, conditioned=c, inputs=inputs, split=split, physics_guided=False, \
-                                  filt_alt=filt_alt, num = exp_num+1, split_num = 2)
-                    run_experiment(data, model_name, batch_size, epochs, W=W, conditioned=c, inputs=inputs, split=split, physics_guided=False, \
-                                  filt_alt=filt_alt, num = exp_num+2, split_num = 3)
-                    
+                #for c in [True, False]:
+                run_experiment(data, model_name, batch_size, epochs, W=W, conditioned=True, inputs=inputs, split=split, physics_guided=False, \
+                              filt_alt=filt_alt, num = exp_num, split_num = 1, augment = augment)
+                run_experiment(data, model_name, batch_size, epochs, W=W, conditioned=True, inputs=inputs, split=split, physics_guided=False, \
+                              filt_alt=filt_alt, num = exp_num+1, split_num = 2, augment = augment)
+                run_experiment(data, model_name, batch_size, epochs, W=W, conditioned=True, inputs=inputs, split=split, physics_guided=False, \
+                              filt_alt=filt_alt, num = exp_num+2, split_num = 3, augment = augment)
+                

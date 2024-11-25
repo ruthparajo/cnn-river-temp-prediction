@@ -1,22 +1,116 @@
-import rasterio
-import pandas as pd
-import os
-import re
-import subprocess
+import cv2
+import datetime
+import json
 import numpy as np
-from skimage.transform import resize
+import os
 import openpyxl
 from openpyxl import load_workbook
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from rasterio.transform import from_origin
-import shutil
-import matplotlib.pyplot as plt
-from sklearn.model_selection import train_test_split
+import pandas as pd
 import geopandas as gpd
-import tensorflow as tf
-import cv2
-import json
+import matplotlib.pyplot as plt
+import rasterio
+from rasterio.features import geometry_mask, rasterize
+from rasterio.transform import from_origin
+import re
+import shutil
+import subprocess
+from skimage.transform import resize
+from shapely.geometry import LineString, box, Point
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.model_selection import train_test_split
+from sentinelhub import MimeType, CRS, BBox, SentinelHubRequest, SentinelHubDownloadClient, \
+    DataCollection, bbox_to_dimensions, DownloadRequest, SHConfig
+
 from models import *
+
+
+def first_day(month, year):
+    return datetime.date(year, month, 1)
+
+def last_day(any_day):
+    # The day 28 exists in every month. 4 days later, it's always next month
+    next_month = any_day.replace(day=28) + datetime.timedelta(days=4)
+    # subtracting the number of the current day brings us back one month
+    return next_month - datetime.timedelta(days=next_month.day)
+
+def find_closest_point(points_gdf, quadrant_bbox):
+    lat_min, lon_min, lat_max, lon_max = quadrant_bbox
+    
+    # Calcular el centro del cuadrante
+    center_x = (lat_min + lat_max) / 2
+    center_y = (lon_min + lon_max) / 2
+    center_point = Point(center_y, center_x)
+    # Calculate distances from the center of the quadrant to all points
+    distances = points_gdf.geometry.apply(lambda p: p.distance(center_point))
+    # Find the minimum distance
+    min_distance = distances.min()
+    # Filter points that match the minimum distance
+    closest_points = points_gdf[distances == min_distance]
+    return closest_points
+
+def rasterize_linestrings(lines, transform, out_shape):
+    # Convertir a geometría de raster
+    shapes = ((geom, 1) for geom in lines)
+    mask = rasterize(shapes, out_shape=out_shape, transform=transform)
+    return mask
+
+def get_data_request(time_interval, evalscript, bbox, size, data_type, folder):
+    if data_type == 'lst':
+        responses = [SentinelHubRequest.output_response('default', MimeType.TIFF)] 
+    elif data_type == 'ndvi':
+        responses = [
+            SentinelHubRequest.output_response('default', MimeType.TIFF),
+            SentinelHubRequest.output_response('ndvi_image', MimeType.PNG)]
+        
+    return SentinelHubRequest(
+        evalscript=evalscript,
+        input_data=[
+            SentinelHubRequest.input_data(
+                data_collection=DataCollection.LANDSAT_OT_L1,
+                time_interval=time_interval,
+                mosaicking_order='leastCC',
+                maxcc=0.1
+            )
+        ],
+        responses=responses,
+        bbox=bbox,
+        size=size,
+        data_folder=folder,
+        config=config
+    )
+
+def adjust_size(size, max_size=2500):
+    """ Adjusts the size so that none of the axes exceed max_size, maintaining the aspect ratio """
+    width, height = size
+    max_dimension = max(width, height)
+
+    if max_dimension > max_size:
+        scale_factor = max_size / max_dimension
+        width = int(width * scale_factor)
+        height = int(height * scale_factor)
+
+    return width, height
+
+def get_data(shp, evalscript, time_intervals, data_type, folder):
+    coords_wgs84 = list(shp.total_bounds)#[lon_min, lat_min, lon_max, lat_max]
+    if data_type == 'lst':  # Assuming 'lst' uses thermal bands B10 or B11
+        resolution = 100  # Set to 100 meters for thermal bands
+    else:
+        resolution = 30  # Default to 30 meters for other bands
+
+    #resolution = 30
+    bbox = BBox(bbox=coords_wgs84, crs=CRS.WGS84)
+    # extract the size based on bbx and the resolution
+    size = bbox_to_dimensions(bbox, resolution=resolution)
+
+    size = adjust_size(size)
+
+    # create a list of requests
+    list_of_requests = [get_data_request(slot, evalscript, bbox, size, data_type, folder) for slot in time_intervals]
+    list_of_requests = [request.download_list[0] for request in list_of_requests]
+
+    # download data with multiple threads
+    data = SentinelHubDownloadClient(config=config).download(list_of_requests, max_threads=5)
 
 
 def load_raster(filepath,rgb = True):
@@ -522,14 +616,27 @@ def save_and_display_gradcam(img, heatmap, filename, alpha=0.4):
     cv2.imwrite(filename, superimposed_img)
     print(f"Saved Grad-CAM to {filename}")
 
-def save_grad_map(val_input_gradients, image_path,impact_channel):
-    grad_map = val_input_gradients[0, :, :, impact_channel].numpy()  
-    
-    plt.imshow(grad_map, cmap="bwr")
+def save_grad_map(input_gradients, image_path, impact_channel, W, save_numpy=False):
+    # Extraer gradientes para el canal de interés
+    grad_map = input_gradients[0, :, :, impact_channel].numpy()  # (4, 4)
+
+    # Opción para guardar los gradientes originales
+    if save_numpy:
+        np.save(f"{image_path}.npy", grad_map)  # Guardar los gradientes originales como .npy
+
+    # Normalización para visualización
+    grad_map_normalized = (grad_map - np.min(grad_map)) / (np.max(grad_map) - np.min(grad_map) + 1e-8)
+
+    # Redimensionar para visualización
+    grad_map_resized = tf.image.resize(grad_map_normalized[..., np.newaxis], (W, W)).numpy().squeeze()
+
+    # Guardar la imagen para visualización
+    plt.imshow(grad_map_resized, cmap="bwr")
     plt.colorbar()
-    plt.title(f"Impacto del canal {impact_channel} en validación")
-    plt.savefig(image_path, dpi=300, bbox_inches='tight')
+    plt.title(f"Channel impact {impact_channel} in test")
+    plt.savefig(f"{image_path}.png", dpi=300, bbox_inches='tight')
     plt.close()
+
     print('Saved at', image_path)
 
 
@@ -766,9 +873,12 @@ def build_model_map(model_name, input_args, conditioned, W, train_input=None):
                                       (build_cnn_baseline(input_args) if not conditioned else \
                                        build_cnn_model_features_8x8(input_args[0], input_args[1]))
         ),
-        "CNN": lambda: build_cnn_model(input_args),
-        "img_2_img": lambda: build_img_2_img_model(input_args),
-        "UNet": lambda: build_unet(input_args),
+        "CNN_2": lambda: build_cnn_model_features2(input_args[0], input_args[1]) if conditioned and W not in [8, 16] \
+                                else (build_cnn_baseline_8x8(input_args) if W in [8, 16] and not conditioned else \
+                                      (build_cnn_baseline(input_args) if not conditioned else \
+                                       build_cnn_model_features_8x8(input_args[0], input_args[1]))),
+        "CNN_3": lambda: build_cnn_model_features2(input_args[0], input_args[1]),
+        "Resnet": lambda: build_resnet(input_args[0], input_args[1]) if conditioned else build_simple_resnet(input_args),
         "transfer_learning_VGG16": lambda: build_transfer_model((W, W, 3)),
         "img_wise_CNN_improved": lambda: build_simplified_cnn_model_improved(input_args)
     }
@@ -780,3 +890,43 @@ def build_model_map(model_name, input_args, conditioned, W, train_input=None):
     # Obtener y devolver el modelo
     return model_map.get(model_name, lambda: None)()  # Devuelve `None` si el modelo no existe
 
+def crop_raster(input_path, crop_size):
+    with rasterio.open(input_path) as src:
+        if crop_size > src.width or crop_size > src.height:
+            raise ValueError(f"Crop size {crop_size}x{crop_size} exceeds raster dimensions {src.width}x{src.height}")
+        
+        # Define the crop window for the central crop_size x crop_size pixels
+        left = (src.width - crop_size) // 2
+        top = (src.height - crop_size) // 2
+        window = Window(left, top, crop_size, crop_size)
+        
+        # Read the cropped window data
+        cropped_data = src.read(1,window=window)
+    return cropped_data
+
+def augment_data(image, label):
+    """
+    Apply data augmentation to training images.
+    Args:
+        image: A tensor of shape (64, 64, 7) where the first 3 channels are LST (RGB).
+        label: The scalar temperature value.
+    Returns:
+        Augmented image and label.
+    """
+    # Separate RGB channels (LST) and other variables
+    lst_rgb = image[:, :, :3]  # First 3 channels
+    other_variables = image[:, :, 3:]  # Remaining channels (NDVI, altitude, slope, direction)
+
+    # Apply brightness/contrast adjustments only to RGB channels
+    lst_rgb = tf.image.random_brightness(lst_rgb, max_delta=0.1)  # Adjust brightness
+    lst_rgb = tf.image.random_contrast(lst_rgb, lower=0.9, upper=1.1)  # Adjust contrast
+
+    # Recombine RGB and other variables for spatial augmentations
+    full_image = tf.concat([lst_rgb, other_variables], axis=-1)
+
+    # Apply spatial augmentations (flips, rotations, zooms) to all channels
+    full_image = RandomRotation(factor=0.1)(full_image)  # Rotate up to ±10%
+    full_image = RandomZoom(height_factor=0.1, width_factor=0.1)(full_image)  # Zoom in/out
+    full_image = RandomFlip(mode="horizontal_and_vertical")(full_image)  # Flip in both directions
+
+    return full_image, label

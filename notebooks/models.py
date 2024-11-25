@@ -166,84 +166,184 @@ def build_cnn_model_features_8x8(input_shape, additional_inputs_shape):
 
     return model
 
+def build_cnn_model_features2(input_shape, additional_inputs_shape):
+    # Image input branch
+    image_input = Input(shape=input_shape, name="Image_Input")
 
-def build_cnn_baseline(input_shape):
-    model = models.Sequential()
+    # Convolutional layers with fewer pooling layers to accommodate smaller resolution
+    x = layers.Conv2D(16, (3, 3), kernel_regularizer=regularizers.l2(0.001))(image_input)
+    x = layers.LeakyReLU(alpha=0.1)(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.MaxPooling2D((2, 2))(x)  # Reduces resolution to 32x32
+    x = layers.Dropout(0.2)(x)
 
-    # Capa 1: Convolucional + Batch Normalization + Leaky ReLU + Max Pooling
-    model.add(layers.Conv2D(16, (3, 3), input_shape=input_shape))
-    model.add(layers.LeakyReLU(alpha=0.1))
-    model.add(layers.BatchNormalization())
-    model.add(layers.MaxPooling2D((2, 2)))
+    x = layers.Conv2D(32, (3, 3), kernel_regularizer=regularizers.l2(0.001))(x)
+    x = layers.LeakyReLU(alpha=0.1)(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.MaxPooling2D((2, 2))(x)  # Reduces resolution to 16x16
+    x = layers.Dropout(0.3)(x)
 
-    # Capa 2: Convolucional + Batch Normalization + Leaky ReLU + Max Pooling
-    model.add(layers.Conv2D(32, (3, 3)))
-    model.add(layers.LeakyReLU(alpha=0.1))
-    model.add(layers.BatchNormalization())
-    model.add(layers.MaxPooling2D((2, 2)))
+    x = layers.Conv2D(64, (3, 3), kernel_regularizer=regularizers.l2(0.001))(x)
+    x = layers.LeakyReLU(alpha=0.1)(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.MaxPooling2D((2, 2))(x)  # Reduces resolution to 8x8
+    x = layers.Dropout(0.4)(x)
 
-    # Capa 3: Convolucional + Batch Normalization + Leaky ReLU + Max Pooling
-    model.add(layers.Conv2D(64, (3, 3)))
-    model.add(layers.LeakyReLU(alpha=0.1))
-    model.add(layers.BatchNormalization())
-    model.add(layers.MaxPooling2D((2, 2)))
+    # Global Average Pooling for dimensionality reduction
+    x = layers.Flatten()(x)  # Output becomes a vector
 
-    # Global Average Pooling
-    model.add(layers.GlobalAveragePooling2D()) # try flatten
+    # Additional features input branch
+    additional_features_input = Input(shape=(additional_inputs_shape,), name="Additional_Features_Input")
+    y = layers.Dense(64, activation='relu')(additional_features_input)
+    y = layers.BatchNormalization()(y)
+    y = layers.Dropout(0.3)(y)
 
-    # Capas densas con Dropout reducido
-    model.add(layers.Dense(64, activation='relu', kernel_regularizer=regularizers.l2(0.001)))
-    model.add(layers.Dropout(0.3))  # Dropout reducido
+    # Combine both branches
+    combined = layers.concatenate([x, y])
+    combined = layers.Dense(128, activation='relu', kernel_regularizer=regularizers.l2(0.001))(combined)
+    combined = layers.Dropout(0.3)(combined)
 
-    # Capa de salida
-    model.add(layers.Dense(1, activation='linear'))
+    # Output layer
+    output = layers.Dense(1, activation='linear')(combined)
+
+    # Define the model
+    model = models.Model(inputs=[image_input, additional_features_input], outputs=output)
 
     return model
 
-def build_cnn_model_features(input_shape, additional_inputs_shape):
-    # Entrada de imagen (7 canales, como en tu configuración actual)
+def build_cnn_model_features3(input_shape, additional_inputs_shape):
+    # Image input branch
     image_input = Input(shape=input_shape, name="Image_Input")
 
-    # Rama de la imagen: Capas convolucionales
-    x = layers.Conv2D(16, (3, 3), kernel_regularizer=regularizers.l2(0.0001))(image_input) 
-    # x = layers.Conv2D(16, (3, 3), activation='relu', kernel_regularizer=regularizers.l2(0.001))(image_input)
+    # Convolutional layers with fewer pooling layers to accommodate smaller resolution
+    x = layers.Conv2D(32, (3, 3), kernel_regularizer=regularizers.l2(0.001))(image_input)
     x = layers.LeakyReLU(alpha=0.1)(x)
     x = layers.BatchNormalization()(x)
-    x = layers.MaxPooling2D((2, 2))(x)
+    x = layers.MaxPooling2D((2, 2))(x)  # Reduces resolution to 32x32
+    x = layers.Dropout(0.2)(x)
 
-    x = layers.Conv2D(32, (3, 3), kernel_regularizer=regularizers.l2(0.0001))(x)
+    x = layers.Conv2D(64, (3, 3), kernel_regularizer=regularizers.l2(0.001))(x)
     x = layers.LeakyReLU(alpha=0.1)(x)
     x = layers.BatchNormalization()(x)
-    x = layers.MaxPooling2D((2, 2))(x)
+    x = layers.MaxPooling2D((2, 2))(x)  # Reduces resolution to 16x16
+    x = layers.Dropout(0.3)(x)
 
-    x = layers.Conv2D(64, (3, 3), kernel_regularizer=regularizers.l2(0.0001))(x)
+    x = layers.Conv2D(128, (3, 3), kernel_regularizer=regularizers.l2(0.001))(x)
     x = layers.LeakyReLU(alpha=0.1)(x)
     x = layers.BatchNormalization()(x)
-    x = layers.MaxPooling2D((2, 2))(x)
+    x = layers.MaxPooling2D((2, 2))(x)  # Reduces resolution to 8x8
+    x = layers.Dropout(0.4)(x)
 
-    # Global Average Pooling para reducir la dimensionalidad de la imagen
-    x = layers.GlobalAveragePooling2D()(x)
+    # Global Average Pooling for dimensionality reduction
+    x = layers.Flatten()(x)  # Output becomes a vector
 
-    # Entrada de características adicionales (vectores)
+    # Additional features input branch
     additional_features_input = Input(shape=(additional_inputs_shape,), name="Additional_Features_Input")
-
-    # Procesamiento de los inputs adicionales
-    y = layers.Dense(32, activation='relu')(additional_features_input)
+    y = layers.Dense(64, activation='relu')(additional_features_input)
     y = layers.BatchNormalization()(y)
-    y = layers.Dropout(0.2)(y)  # Regularización
+    y = layers.Dropout(0.3)(y)
 
-    # Concatenación de las dos ramas
-    combined = concatenate([x, y])
+    # Combine both branches
+    combined = layers.concatenate([x, y])
+    combined = layers.Dense(128, activation='relu', kernel_regularizer=regularizers.l2(0.001))(combined)
+    combined = layers.Dropout(0.3)(combined)
 
-    # Capas densas finales después de la concatenación
-    combined = layers.Dense(64, activation='relu', kernel_regularizer=regularizers.l2(0.0001))(combined)
-    combined = layers.Dropout(0.2)(combined)
-
-    # Capa de salida con una sola neurona para la predicción escalar
+    # Output layer
     output = layers.Dense(1, activation='linear')(combined)
 
-    # Definición del modelo con ambas entradas
+    # Define the model
     model = models.Model(inputs=[image_input, additional_features_input], outputs=output)
+
+    return model
+
+def resnet_block(x, filters, kernel_size=3, stride=1):
+    """A basic ResNet block with skip connections."""
+    shortcut = x
+
+    # First convolutional layer
+    x = layers.Conv2D(filters, kernel_size, strides=stride, padding="same")(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.ReLU()(x)
+
+    # Second convolutional layer
+    x = layers.Conv2D(filters, kernel_size, strides=1, padding="same")(x)
+    x = layers.BatchNormalization()(x)
+
+    # Add skip connection
+    if stride > 1 or x.shape[-1] != shortcut.shape[-1]:  # Match dimensions
+        shortcut = layers.Conv2D(filters, 1, strides=stride, padding="same")(shortcut)
+        shortcut = layers.BatchNormalization()(shortcut)
+
+    x = layers.add([x, shortcut])
+    x = layers.ReLU()(x)
+
+    return x
+
+def build_resnet(input_shape, additional_inputs_shape):
+    # Image input branch
+    image_input = Input(shape=input_shape, name="Image_Input")
+
+    # Initial Conv Layer
+    x = layers.Conv2D(64, (7, 7), strides=2, padding="same")(image_input)
+    x = layers.BatchNormalization()(x)
+    x = layers.ReLU()(x)
+    x = layers.MaxPooling2D((3, 3), strides=2, padding="same")(x)
+
+    # Residual Blocks
+    x = resnet_block(x, 64)
+    x = resnet_block(x, 64)
+    x = resnet_block(x, 128, stride=2)  # Downsample
+    x = resnet_block(x, 128)
+    x = resnet_block(x, 256, stride=2)  # Downsample
+    x = resnet_block(x, 256)
+    x = layers.GlobalAveragePooling2D()(x)
+
+    # Additional features input branch
+    additional_features_input = Input(shape=(additional_inputs_shape,), name="Additional_Features_Input")
+    y = layers.Dense(64, activation='relu')(additional_features_input)
+    y = layers.BatchNormalization()(y)
+    y = layers.Dropout(0.3)(y)
+
+    # Combine both branches
+    combined = layers.concatenate([x, y])
+    combined = layers.Dense(128, activation='relu')(combined)
+    combined = layers.Dropout(0.3)(combined)
+
+    # Output layer
+    output = layers.Dense(1, activation='linear')(combined)
+
+    # Define the model
+    model = models.Model(inputs=[image_input, additional_features_input], outputs=output)
+
+    return model
+
+def build_simple_resnet(input_shape):
+    """Build a ResNet-like model for image inputs."""
+    # Input layer
+    image_input = Input(shape=input_shape, name="Image_Input")
+
+    # Initial convolutional layer
+    x = layers.Conv2D(64, (7, 7), strides=2, padding="same", kernel_regularizer=regularizers.l2(0.001))(image_input)
+    x = layers.BatchNormalization()(x)
+    x = layers.ReLU()(x)
+    x = layers.MaxPooling2D((3, 3), strides=2, padding="same")(x)
+
+    # Residual blocks
+    x = resnet_block(x, 64)
+    x = resnet_block(x, 64)
+    x = resnet_block(x, 128, stride=2)  # Downsample
+    x = resnet_block(x, 128)
+    x = resnet_block(x, 256, stride=2)  # Downsample
+    x = resnet_block(x, 256)
+
+    # Global Average Pooling
+    x = layers.GlobalAveragePooling2D()(x)
+
+    # Dense output layer for scalar prediction
+    output = layers.Dense(1, activation="linear")(x)
+
+    # Define the model
+    model = models.Model(inputs=image_input, outputs=output)
 
     return model
 
