@@ -103,6 +103,7 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
 
     
     # Start model
+    print('INPUT SHAPE',input_args)
     model = build_model_map(model_name, input_args, conditioned, W, train_input)
     start_time = time.time()
         
@@ -113,22 +114,54 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
     
     # Create batch dataset
     dataset = tf.data.Dataset.from_tensor_slices((*model_input, train_target) if conditioned else (model_input, train_target))
-    if augment == True:
-        dataset = (dataset.map(augment_data, num_parallel_calls=tf.data.AUTOTUNE)  # Apply augmentation only here
-                    .batch(batch_size)
-                    .cache()
-                    .prefetch(tf.data.AUTOTUNE)
-                    )
-    else:
-        dataset = dataset.batch(batch_size).cache().prefetch(tf.data.AUTOTUNE)
+    if augment:
+        # Duplicate the dataset for augmentation
+        augmented_dataset = (
+            dataset.map(lambda image, label: augment_data(image, label), num_parallel_calls=tf.data.AUTOTUNE)  # Augmentation
+        )
+        
+        # Combine original and augmented datasets
+        dataset = dataset.concatenate(augmented_dataset)
+    
+    dataset = dataset.batch(batch_size).cache().prefetch(tf.data.AUTOTUNE)
         
     dataset_val = tf.data.Dataset.from_tensor_slices((*val_model_input, validation_target) if conditioned else (val_model_input, validation_target))
     dataset_val = dataset_val.batch(batch_size).cache().prefetch(tf.data.AUTOTUNE)
 
+    sample_image, sample_label = next(iter(dataset))  # Take one batch
+    augmented_images = [augment_data(sample_image[0], sample_label[0])[0].numpy() for _ in range(10)]
+    # Save a grid plot of augmented images
+    plt.figure(figsize=(15, 5))
+    for i, aug_img in enumerate(augmented_images):
+        plt.subplot(2, 5, i + 1)
+        plt.imshow(aug_img[:, :, :3])  # Show only the RGB channels
+        plt.title(f"Augmented {i+1}")
+        plt.axis("off")
+    plt.tight_layout()
+    # Save the plot
+    output_plot_path = "../plots/augmented_examples_plot.png"
+    plt.savefig(output_plot_path, dpi=300)
+
+    output_file = "../official_results/augmentation_report.txt"
+    # Count images in original and augmented datasets
+    original_images_count = count_images(dataset)  # Assuming `dataset` is your original dataset
+    augmented_images_count = count_images(augmented_dataset)  # Assuming `augmented_dataset` contains augmented images
+    
+    # Write the counts to a text file
+    with open(output_file, "w") as f:
+        f.write("Augmentation Report\n")
+        f.write("===================\n")
+        f.write(f"Original images: {original_images_count}\n")
+        f.write(f"Augmented images: {augmented_images_count}\n")
+        f.write(f"Total images (original + augmented): {original_images_count + augmented_images_count}\n")
+
+    
+
     #initial_lr = 0.01
     #lr_schedule = ExponentialDecay(initial_lr, decay_steps=50, decay_rate=0.96, staircase=True)
     #optimizer = tf.keras.optimizers.SGD(learning_rate=lr_schedule, momentum=0.9, nesterov=True)
-    optimizer = tf.keras.optimizers.Adam()
+    optimizer = tf.keras.optimizers.SGD()
+    #optimizer = tf.keras.optimizers.Adam()
     errors_log = {"epoch": [], "month": [], "error": []}
     loss_per_epoch = []
     val_loss_per_epoch = []
@@ -141,7 +174,7 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
      
     
     # Early Stopping parameters
-    patience = 30  # Number of epochs with no improvement before stopping
+    patience = 300  # Number of epochs with no improvement before stopping
     min_delta = 1e-4  # Minimum improvement required to consider progress
     best_val_loss = float('inf')  # Best observed validation loss
     wait = 0  # Counter for epochs without improvement
@@ -272,7 +305,8 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
     laabeel = 'month, discharge, lat, lon' if conditioned else None
     var_inputs = '' if inputs == None else ', '.join(inputs)
     variables = ', '.join([var_inputs, laabeel]) if conditioned else var_inputs
-    details = {'Experiment':num,'RMSE':rmse_test,'Variables':variables,'Input': f'{len(np.unique(labels))} cells', 'Split': split[0], \
+    inp_str = f'{len(np.unique(labels))} cells + augmented' if augment else f'{len(np.unique(labels))} cells'
+    details = {'Experiment':num,'RMSE':rmse_test,'Variables':variables,'Input': inp_str, 'Split': split[0], \
                'Split_id': split_num,'Optimizer': opt,'nº samples': len(data_targets), 'Batch size': batch_size, \
                'Epochs': f'{num_final_epochs} of {epochs}','Date':current_date,'Time':current_time, 'Duration': duration, \
                'Loss':  'Physics-guided' if physics_guided else 'RMSE', 'Resolution':W}
@@ -324,7 +358,7 @@ if __name__ == '__main__':
     else:
         data_folder = f'../data/preprocessed/{W}x{W}/'
         
-    filt_alt = True 
+    filt_alt = False 
     augment = True
     
     data = load_all_data(

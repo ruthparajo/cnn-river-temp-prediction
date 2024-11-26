@@ -2,6 +2,7 @@ import tensorflow as tf
 from tensorflow.keras import layers, models, regularizers, Input
 from tensorflow.keras.layers import concatenate
 import numpy as np
+from tensorflow.keras.applications import ResNet50
 
 ############################# Models #############################
 
@@ -211,6 +212,41 @@ def build_cnn_model_features2(input_shape, additional_inputs_shape):
 
     return model
 
+def build_cnn3(input_shape):
+    model = models.Sequential()
+
+    # Capa 1: Convolucional + Batch Normalization + Leaky ReLU + Max Pooling
+    model.add(layers.Conv2D(16, (3, 3),kernel_regularizer=regularizers.l2(0.0001), input_shape=input_shape))
+    model.add(layers.LeakyReLU(alpha=0.1))
+    model.add(layers.BatchNormalization())
+    model.add(layers.Dropout(0.2))
+    model.add(layers.MaxPooling2D((2, 2)))
+
+    # Capa 2: Convolucional + Batch Normalization + Leaky ReLU + Max Pooling
+    model.add(layers.Conv2D(32, (3, 3),kernel_regularizer=regularizers.l2(0.0001)))
+    model.add(layers.LeakyReLU(alpha=0.1))
+    model.add(layers.BatchNormalization())
+    model.add(layers.Dropout(0.2))
+    model.add(layers.MaxPooling2D((2, 2)))
+
+    # Capa 3: Convolucional + Batch Normalization + Leaky ReLU + Max Pooling
+    model.add(layers.Conv2D(64, (3, 3), kernel_regularizer=regularizers.l2(0.0001),))
+    model.add(layers.LeakyReLU(alpha=0.1))
+    model.add(layers.BatchNormalization())
+    model.add(layers.Dropout(0.2))
+    model.add(layers.MaxPooling2D((2, 2)))
+
+    # Global Average Pooling
+    model.add(layers.Flatten()) # try flatten
+
+    model.add(layers.Dense(128, activation='relu', kernel_regularizer=regularizers.l2(0.0001)))
+    model.add(layers.Dropout(0.3))  # Increased Dropout
+    model.add(layers.Dense(64, activation='relu', kernel_regularizer=regularizers.l2(0.0001)))
+
+    model.add(layers.Dense(1, activation='linear'))
+
+    return model
+
 def build_cnn_model_features3(input_shape, additional_inputs_shape):
     # Image input branch
     image_input = Input(shape=input_shape, name="Image_Input")
@@ -346,6 +382,150 @@ def build_simple_resnet(input_shape):
     model = models.Model(inputs=image_input, outputs=output)
 
     return model
+
+
+
+def build_pretrained_resnet(input_shape):
+    """
+    Build a ResNet50 model that dynamically adapts to the number of input channels.
+    Args:
+        input_shape: Tuple of the input shape (H, W, C), where C is variable.
+    Returns:
+        A Keras Model.
+    """
+    print('A CONSTRUIR',input_shape)
+    # Load the ResNet50 model without the top layers
+    base_model = ResNet50(weights='imagenet', include_top=False)
+
+    # Get the first convolutional layer
+    first_conv_layer = next(layer for layer in base_model.layers if isinstance(layer, layers.Conv2D))
+    original_weights = first_conv_layer.get_weights()
+    original_kernel, original_bias = original_weights
+
+    # Dynamically adjust kernel weights for the input channels
+    input_channels = input_shape[-1]
+    if input_channels == 3:
+        # If input is 3 channels, keep the original weights
+        new_kernel = original_kernel
+    else:
+        # Average original weights across channels and tile to match input channels
+        new_kernel = np.mean(original_kernel, axis=-2, keepdims=True)  # Average weights
+        new_kernel = np.tile(new_kernel, (1, 1, input_channels, 1))  # Tile to match new channels
+
+    # Define a new input layer for variable channels
+    new_input = layers.Input(shape=input_shape, name="Input_Variable_Channels")
+
+    # Replace the first convolutional layer with the modified one
+    custom_first_layer = layers.Conv2D(
+        filters=first_conv_layer.filters,
+        kernel_size=first_conv_layer.kernel_size,
+        strides=first_conv_layer.strides,
+        padding=first_conv_layer.padding,
+        activation=first_conv_layer.activation,
+        name="custom_conv_channels",
+        kernel_regularizer=regularizers.l2(0.001)
+    )
+    x = custom_first_layer(new_input)
+    custom_first_layer.set_weights([new_kernel, original_bias])
+    print(x.shape)
+
+    first_layer_index = base_model.layers.index(first_conv_layer)
+
+    # Pass the output through the remaining ResNet layers
+    for i, layer in enumerate(base_model.layers[first_layer_index + 1:]):
+        try:
+            x = layer(x)
+            print(f"Layer {i} ({layer.name}) output shape: {x.shape}")
+        except Exception as e:
+            print(f"Error in layer {i} ({layer.name}): {e}")
+            break
+        
+
+    # Add custom layers for regression
+    x = layers.GlobalAveragePooling2D()(x)
+    x = layers.Dense(128, activation='relu', kernel_regularizer=regularizers.l2(0.001))(x)
+    x = layers.Dropout(0.4)(x)
+    output = layers.Dense(1, activation='linear', name="Output")(x)
+
+    # Build the model
+    model = models.Model(inputs=new_input, outputs=output)
+    return model
+
+def build_pretrained_resnet_features(input_shape, scalar_shape):
+    """
+    Build a ResNet50 model with additional scalar inputs that dynamically adapts to the number of input channels.
+    Args:
+        input_shape: Tuple of the input shape (H, W, C), where C is variable.
+        scalar_shape: Tuple representing the shape of the scalar inputs.
+    Returns:
+        A Keras Model.
+    """
+    # Load the ResNet50 model without the top layers
+    base_model = ResNet50(weights='imagenet', include_top=False)
+
+    # Get the first convolutional layer
+    first_conv_layer = next(layer for layer in base_model.layers if isinstance(layer, layers.Conv2D))
+    original_weights = first_conv_layer.get_weights()
+    original_kernel, original_bias = original_weights
+
+    # Dynamically adjust kernel weights for the input channels
+    input_channels = input_shape[-1]
+    if input_channels == 3:
+        # If input is 3 channels, keep the original weights
+        new_kernel = original_kernel
+    else:
+        # Average original weights across channels and tile to match input channels
+        new_kernel = np.mean(original_kernel, axis=-2, keepdims=True)  # Average weights
+        new_kernel = np.tile(new_kernel, (1, 1, input_channels, 1))  # Tile to match new channels
+
+    # Define a new input layer for variable channels
+    image_input = layers.Input(shape=input_shape, name="Image_Input")
+
+    # Replace the first convolutional layer with the modified one
+    custom_first_layer = layers.Conv2D(
+        filters=first_conv_layer.filters,
+        kernel_size=first_conv_layer.kernel_size,
+        strides=first_conv_layer.strides,
+        padding=first_conv_layer.padding,
+        activation=first_conv_layer.activation,
+        name="Custom_Conv_Channels",
+        kernel_regularizer=regularizers.l2(0.001)
+    )
+    x = custom_first_layer(image_input)
+    custom_first_layer.set_weights([new_kernel, original_bias])
+
+    first_layer_index = base_model.layers.index(first_conv_layer)
+
+    # Pass the output through the remaining ResNet layers
+    for i, layer in enumerate(base_model.layers[first_layer_index + 1:]):
+        try:
+            x = layer(x)
+        except Exception as e:
+            print(f"Error in layer {i} ({layer.name}): {e}")
+            break
+
+    # Add global average pooling for image features
+    image_features = layers.GlobalAveragePooling2D(name="Global_Avg_Pooling")(x)
+
+    # Add a new input layer for scalar variables
+    scalar_input = layers.Input(shape=scalar_shape, name="Scalar_Input")
+
+    # Concatenate image features with scalar inputs
+    combined_features = layers.concatenate([image_features, scalar_input], name="Concat_Image_Scalars")
+
+    # Add fully connected layers for regression
+    x = layers.Dense(128, activation='relu', kernel_regularizer=regularizers.l2(0.001))(combined_features)
+    x = layers.Dropout(0.4)(x)
+    output = layers.Dense(1, activation='linear', name="Output")(x)
+
+    # Build the model
+    model = models.Model(inputs=[image_input, scalar_input], outputs=output)
+    return model
+
+
+
+
+
 
 ############################# Loss functions #############################
 

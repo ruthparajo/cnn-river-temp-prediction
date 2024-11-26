@@ -877,10 +877,11 @@ def build_model_map(model_name, input_args, conditioned, W, train_input=None):
                                 else (build_cnn_baseline_8x8(input_args) if W in [8, 16] and not conditioned else \
                                       (build_cnn_baseline(input_args) if not conditioned else \
                                        build_cnn_model_features_8x8(input_args[0], input_args[1]))),
-        "CNN_3": lambda: build_cnn_model_features2(input_args[0], input_args[1]),
+        "CNN_3": lambda: build_cnn_model_features3(input_args[0], input_args[1]) if conditioned else \
+                            (build_cnn3(input_args)),
         "Resnet": lambda: build_resnet(input_args[0], input_args[1]) if conditioned else build_simple_resnet(input_args),
-        "transfer_learning_VGG16": lambda: build_transfer_model((W, W, 3)),
-        "img_wise_CNN_improved": lambda: build_simplified_cnn_model_improved(input_args)
+        "transfer_resnet": lambda: build_pretrained_resnet(input_args) if not conditioned else \
+                                    build_pretrained_resnet_features(input_args[0], input_args[1])
     }
 
     # Si el modelo requiere un preprocesamiento especial, como en transfer learning
@@ -904,29 +905,123 @@ def crop_raster(input_path, crop_size):
         cropped_data = src.read(1,window=window)
     return cropped_data
 
+
+def rotate_image(image, max_angle_degrees=10):
+    """
+    Rotate an image by a random angle within ±max_angle_degrees.
+    Args:
+        image: Input image tensor (H, W, C).
+        max_angle_degrees: Maximum rotation angle in degrees.
+    Returns:
+        Rotated image tensor.
+    """
+    # Convert degrees to radians
+    max_angle_radians = max_angle_degrees * tf.constant(3.14159265 / 180, dtype=tf.float32)
+
+    # Generate a random angle for rotation
+    angle = tf.random.uniform([], -max_angle_radians, max_angle_radians)
+
+    # Rotate the image using TensorFlow's affine transformations
+    image_center = tf.cast(tf.shape(image)[:2], tf.float32) / 2.0
+    rotation_matrix = tf.convert_to_tensor([
+        [tf.cos(angle), -tf.sin(angle), image_center[0] - image_center[0] * tf.cos(angle) + image_center[1] * tf.sin(angle)],
+        [tf.sin(angle), tf.cos(angle), image_center[1] - image_center[0] * tf.sin(angle) - image_center[1] * tf.cos(angle)],
+        [0.0, 0.0, 1.0]
+    ])
+
+    # Apply rotation
+    rotated_image = tf.keras.layers.experimental.preprocessing.RandomRotation(
+        factor=max_angle_degrees / 180)(image)
+    return rotated_image
+
+def rotate_image(image, max_angle_degrees=10):
+    """
+    Rotate an image by a random angle within ±max_angle_degrees using pure TensorFlow.
+    Args:
+        image: Input image tensor (H, W, C).
+        max_angle_degrees: Maximum rotation angle in degrees.
+    Returns:
+        Rotated image tensor.
+    """
+    # Convert degrees to radians
+    max_angle_radians = max_angle_degrees * tf.constant(3.14159265 / 180, dtype=tf.float32)
+
+    # Generate random rotation angle in radians
+    angle = tf.random.uniform([], -max_angle_radians, max_angle_radians)
+
+    # Get image dimensions
+    height, width = tf.shape(image)[0], tf.shape(image)[1]
+
+    # Rotation matrix components
+    cos_angle = tf.cos(angle)
+    sin_angle = tf.sin(angle)
+
+    # Construct the flattened transform matrix
+    transform = tf.convert_to_tensor([
+        cos_angle, -sin_angle, 0.0,  # First row: a, b, c
+        sin_angle, cos_angle,  0.0,  # Second row: d, e, f
+        0.0, 0.0
+    ], dtype=tf.float32)
+
+    # Add batch dimension to image and transform
+    transform = tf.expand_dims(transform, axis=0)  # Shape [1, 6]
+    rotated_image = tf.raw_ops.ImageProjectiveTransformV3(
+        images=tf.expand_dims(image, axis=0),  # Add batch dimension
+        transforms=transform,  # Use the transform matrix
+        output_shape=[height, width],
+        interpolation="BILINEAR",
+        fill_value=0.0  # Fill outside pixels with 0 (black)
+    )
+
+    return tf.squeeze(rotated_image, axis=0)  # Remove batch dimension
+
+
 def augment_data(image, label):
     """
-    Apply data augmentation to training images.
+    Apply data augmentation using TensorFlow image processing functions.
     Args:
-        image: A tensor of shape (64, 64, 7) where the first 3 channels are LST (RGB).
+        image: A tensor of shape (H, W, C) where the first 3 channels are RGB.
         label: The scalar temperature value.
     Returns:
         Augmented image and label.
     """
-    # Separate RGB channels (LST) and other variables
-    lst_rgb = image[:, :, :3]  # First 3 channels
-    other_variables = image[:, :, 3:]  # Remaining channels (NDVI, altitude, slope, direction)
+    # Define augmentation parameters
+    brightness_delta = 0.1
+    contrast_lower = 0.9
+    contrast_upper = 1.1
+    flip_prob = 0.5
 
-    # Apply brightness/contrast adjustments only to RGB channels
-    lst_rgb = tf.image.random_brightness(lst_rgb, max_delta=0.1)  # Adjust brightness
-    lst_rgb = tf.image.random_contrast(lst_rgb, lower=0.9, upper=1.1)  # Adjust contrast
+    # Separate RGB and other variables
+    lst_rgb = image[:, :, :3]
+    other_variables = image[:, :, 3:]
 
-    # Recombine RGB and other variables for spatial augmentations
+    # Brightness and contrast adjustments (RGB only)
+    lst_rgb = tf.image.random_brightness(lst_rgb, max_delta=brightness_delta)
+    lst_rgb = tf.image.random_contrast(lst_rgb, lower=contrast_lower, upper=contrast_upper)
+
+    # Recombine RGB and other variables
     full_image = tf.concat([lst_rgb, other_variables], axis=-1)
 
-    # Apply spatial augmentations (flips, rotations, zooms) to all channels
-    full_image = RandomRotation(factor=0.1)(full_image)  # Rotate up to ±10%
-    full_image = RandomZoom(height_factor=0.1, width_factor=0.1)(full_image)  # Zoom in/out
-    full_image = RandomFlip(mode="horizontal_and_vertical")(full_image)  # Flip in both directions
+    # Random flips
+    if tf.random.uniform([]) < flip_prob:
+        full_image = tf.image.flip_left_right(full_image)
+    if tf.random.uniform([]) < flip_prob:
+        full_image = tf.image.flip_up_down(full_image)
+
+    # Random rotation
+    full_image = rotate_image(full_image, max_angle_degrees=10)
 
     return full_image, label
+    
+def count_images(dataset):
+    """
+    Count the total number of images in a dataset.
+    Args:
+        dataset: A TensorFlow dataset containing (image, label) pairs.
+    Returns:
+        Total number of images in the dataset.
+    """
+    total_images = 0
+    for images, _ in dataset:  # Iterate over (image, label) pairs
+        total_images += images.shape[0]  # Add the batch size
+    return total_images
