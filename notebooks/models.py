@@ -6,6 +6,43 @@ from tensorflow.keras.applications import ResNet50
 
 ############################# Models #############################
 
+def build_simple_cnn(total_input_shape, use_additional_inputs=False):
+    print(total_input_shape, use_additional_inputs)
+    input_shape = total_input_shape[0] if use_additional_inputs else total_input_shape
+
+    image_input = Input(shape=input_shape, name="Image_Input")
+
+    x = layers.Conv2D(16, (3, 3), activation='relu')(image_input)
+    x = layers.MaxPooling2D((2, 2))(x)
+
+    x = layers.Conv2D(32, (3, 3), activation='relu')(x)
+    x = layers.MaxPooling2D((2, 2))(x)
+
+    x = layers.Conv2D(64, (3, 3), activation='relu')(x)
+    x = layers.MaxPooling2D((2, 2))(x)
+
+    x = layers.Flatten()(x)
+
+    if use_additional_inputs:
+        additional_inputs_shape = total_input_shape[1]
+        additional_features_input = Input(shape=(additional_inputs_shape,), name="Additional_Features_Input")
+
+        combined = layers.concatenate([x, additional_features_input])
+
+        combined = layers.Dense(64, activation='relu')(combined)
+        output = layers.Dense(1, activation='linear')(combined)
+
+        model = models.Model(inputs=[image_input, additional_features_input], outputs=output)
+        
+    else:
+        x = layers.Dense(64, activation='relu')(x)
+        output = layers.Dense(1, activation='linear')(x)
+
+        model = models.Model(inputs=image_input, outputs=output)
+
+    return model
+
+
 def build_cnn_baseline(input_shape):
     model = models.Sequential()
 
@@ -508,7 +545,7 @@ def build_pretrained_resnet_features(input_shape, scalar_shape):
     image_features = layers.GlobalAveragePooling2D(name="Global_Avg_Pooling")(x)
 
     # Add a new input layer for scalar variables
-    scalar_input = layers.Input(shape=scalar_shape, name="Scalar_Input")
+    scalar_input = layers.Input(shape=(scalar_shape,), name="Scalar_Input")
 
     # Concatenate image features with scalar inputs
     combined_features = layers.concatenate([image_features, scalar_input], name="Concat_Image_Scalars")
@@ -523,6 +560,58 @@ def build_pretrained_resnet_features(input_shape, scalar_shape):
     return model
 
 
+from tensorflow.keras import layers, models, regularizers, Input, Model
+
+def build_big_cnn(input_shape, vector_shape):
+    # Entrada de imágenes
+    image_input = Input(shape=input_shape, name="image_input")
+    
+    # Bloque 1: Convolución + BatchNorm + ReLU + MaxPooling
+    x = layers.Conv2D(32, (3, 3), padding='same', kernel_regularizer=regularizers.l2(0.0001))(image_input)
+    x = layers.LeakyReLU(alpha=0.1)(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.MaxPooling2D((2, 2))(x)
+
+    # Bloque 2
+    x = layers.Conv2D(64, (3, 3), padding='same', kernel_regularizer=regularizers.l2(0.0001))(x)
+    x = layers.LeakyReLU(alpha=0.1)(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.MaxPooling2D((2, 2))(x)
+
+    # Bloque 3
+    x = layers.Conv2D(128, (3, 3), padding='same', kernel_regularizer=regularizers.l2(0.0001))(x)
+    x = layers.LeakyReLU(alpha=0.1)(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.MaxPooling2D((2, 2))(x)
+
+    # Bloque 4: Convolución + GlobalAveragePooling
+    x = layers.Conv2D(256, (3, 3), padding='same', kernel_regularizer=regularizers.l2(0.0001))(x)
+    x = layers.LeakyReLU(alpha=0.1)(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.GlobalAveragePooling2D()(x)
+
+    # Entrada de vectores adicionales
+    vector_input = Input(shape=(vector_shape,), name="vector_input")
+    vector_dense = layers.Dense(64, activation='relu', kernel_regularizer=regularizers.l2(0.0001))(vector_input)
+    vector_dense = layers.BatchNormalization()(vector_dense)
+
+    # Concatenación de características extraídas
+    combined = layers.concatenate([x, vector_dense])
+
+    # Capas densas finales
+    combined = layers.Dense(128, activation='relu', kernel_regularizer=regularizers.l2(0.0001))(combined)
+    combined = layers.Dropout(0.3)(combined)
+    combined = layers.Dense(64, activation='relu', kernel_regularizer=regularizers.l2(0.0001))(combined)
+    combined = layers.Dropout(0.3)(combined)
+
+    # Capa de salida
+    output = layers.Dense(1, activation='linear', name="output")(combined)
+
+    # Modelo final
+    model = Model(inputs=[image_input, vector_input], outputs=output)
+    return model
+
+
 
 
 
@@ -533,6 +622,35 @@ def root_mean_squared_error(y_true, y_pred):
     y_true = tf.cast(y_true, tf.float32)
     y_pred = tf.cast(y_pred, tf.float32)
     return tf.sqrt(tf.reduce_mean(tf.square(y_pred - y_true)))
+
+
+def rmse_extreme_sensitive(y_true, y_pred, k1=0.01, k2=1, alpha=1.0):
+    y_true = tf.cast(y_true, tf.float32)
+    y_pred = tf.cast(y_pred, tf.float32)
+    y_true_mean = tf.reduce_mean(y_true)
+    deviations = tf.abs(y_true - y_true_mean) 
+    
+    weights = 1 + k1 * ((deviations * k2) ** alpha)  
+    
+    squared_errors = tf.square(y_pred - y_true)
+    weighted_rmse = tf.sqrt(tf.reduce_mean(weights * squared_errors))
+    
+    return weighted_rmse
+
+def rmse_focal(y_true, y_pred, gamma=2.0):
+    y_true = tf.cast(y_true, tf.float32)
+    y_pred = tf.cast(y_pred, tf.float32)
+    
+    errors = tf.abs(y_pred - y_true)
+    
+    focal_weights = tf.pow(errors, gamma)
+    
+    squared_errors = tf.square(y_pred - y_true)
+    focal_rmse = tf.sqrt(tf.reduce_mean(focal_weights * squared_errors))
+    
+    return focal_rmse
+
+
 
 def conservation_energy_loss(y_true, y_pred, model_input_batch, alpha=0.5, beta=0.5, threshold=5.0):
     # Calcular el promedio de los primeros tres canales de model_input_batch

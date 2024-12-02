@@ -20,6 +20,8 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
 from sentinelhub import MimeType, CRS, BBox, SentinelHubRequest, SentinelHubDownloadClient, \
     DataCollection, bbox_to_dimensions, DownloadRequest, SHConfig
+from rasterio.windows import Window
+
 
 from models import *
 
@@ -698,7 +700,7 @@ def load_all_data(
                 for file in v:
                     if lab in file.split('/')[-1] or lab in file.split('.')[0]:
                         if lab not in imgss:
-                            file_path = os.path.join(file, os.listdir(file)[0]) if k != 'altitude' else os.path.join('../data/preprocessed/altitude', file)
+                            file_path = os.path.join(file, os.listdir(file)[0]) if k != 'altitude' else os.path.join(f'{source_path}altitude', file)
                             r, m = load_raster(file_path, False)
                             var = resize_image(r, W, W)
                             var = np.where(np.isnan(var), 0.0, var)
@@ -712,7 +714,7 @@ def load_all_data(
             print(f"{k}: {np.array(total).shape}")
 
     # Cargar variable objetivo
-    water_temp = pd.read_csv('../data/preprocessed/wt/water_temp.csv', index_col=0)
+    water_temp = pd.read_csv(f'{source_path}wt/water_temp.csv', index_col=0)
     times_ordered = total_times['lst']
     wt_temp = []
     for cell, date in zip(labels, times_ordered):
@@ -866,27 +868,26 @@ def normalize_min_max(data, min_val, max_val):
         return np.zeros_like(data)  # Avoid division by zero
     return (data - min_val) / (max_val - min_val)
 
-def build_model_map(model_name, input_args, conditioned, W, train_input=None):
+def build_model_map(model_name, input_args, W):
+    additional = len(input_args)==2
     model_map = {
-        "baseline_CNN": lambda: build_cnn_model_features(input_args[0], input_args[1]) if conditioned and W not in [8, 16] \
-                                else (build_cnn_baseline_8x8(input_args) if W in [8, 16] and not conditioned else \
-                                      (build_cnn_baseline(input_args) if not conditioned else \
+        "baseline_CNN": lambda: build_cnn_model_features(input_args[0], input_args[1]) if additional and W not in [8, 16] \
+                                else (build_cnn_baseline_8x8(input_args) if W in [8, 16] and not additional else \
+                                      (build_cnn_baseline(input_args) if not additional else \
                                        build_cnn_model_features_8x8(input_args[0], input_args[1]))
         ),
-        "CNN_2": lambda: build_cnn_model_features2(input_args[0], input_args[1]) if conditioned and W not in [8, 16] \
-                                else (build_cnn_baseline_8x8(input_args) if W in [8, 16] and not conditioned else \
-                                      (build_cnn_baseline(input_args) if not conditioned else \
+        "CNN_2": lambda: build_cnn_model_features2(input_args[0], input_args[1]) if additional and W not in [8, 16] \
+                                else (build_cnn_baseline_8x8(input_args) if W in [8, 16] and not additional else \
+                                      (build_cnn_baseline(input_args) if not additional else \
                                        build_cnn_model_features_8x8(input_args[0], input_args[1]))),
-        "CNN_3": lambda: build_cnn_model_features3(input_args[0], input_args[1]) if conditioned else \
+        "CNN_3": lambda: build_cnn_model_features3(input_args[0], input_args[1]) if additional else \
                             (build_cnn3(input_args)),
-        "Resnet": lambda: build_resnet(input_args[0], input_args[1]) if conditioned else build_simple_resnet(input_args),
-        "transfer_resnet": lambda: build_pretrained_resnet(input_args) if not conditioned else \
-                                    build_pretrained_resnet_features(input_args[0], input_args[1])
+        "Resnet": lambda: build_resnet(input_args[0], input_args[1]) if additional else build_simple_resnet(input_args),
+        "transfer_resnet": lambda: build_pretrained_resnet(input_args) if not additional else \
+                                    build_pretrained_resnet_features(input_args[0], input_args[1]),
+        "big_CNN": lambda: build_big_cnn(input_args[0], input_args[1]),
+        "simple_CNN": lambda: build_simple_cnn(input_args, use_additional_inputs=additional)
     }
-
-    # Si el modelo requiere un preprocesamiento especial, como en transfer learning
-    if model_name == "transfer_learning_VGG16" and train_input is not None:
-        train_input = train_input[:, :, :, :3]  # Solo los primeros 3 canales para VGG16
 
     # Obtener y devolver el modelo
     return model_map.get(model_name, lambda: None)()  # Devuelve `None` si el modelo no existe
@@ -976,7 +977,7 @@ def rotate_image(image, max_angle_degrees=10):
     return tf.squeeze(rotated_image, axis=0)  # Remove batch dimension
 
 
-def augment_data(image, label):
+def augment_data(image, label, additional_inp=None):
     """
     Apply data augmentation using TensorFlow image processing functions.
     Args:
@@ -1010,6 +1011,10 @@ def augment_data(image, label):
 
     # Random rotation
     full_image = rotate_image(full_image, max_angle_degrees=10)
+    print("Inside augment_data - Image Shape:", image.shape)
+    if additional_inp is not None:
+        print("Inside augment_data - Additional Input Shape:", additional_inp.shape)
+        return (full_image, additional_inp), label
 
     return full_image, label
     
@@ -1023,5 +1028,8 @@ def count_images(dataset):
     """
     total_images = 0
     for images, _ in dataset:  # Iterate over (image, label) pairs
-        total_images += images.shape[0]  # Add the batch size
+        if len(images)>1:
+            total_images += images[0].shape[0]
+        else:
+            total_images += images.shape[0]  # Add the batch size
     return total_images

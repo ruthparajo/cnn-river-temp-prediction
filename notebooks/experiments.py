@@ -23,7 +23,7 @@ import io
 from contextlib import redirect_stdout
 import logging
 from tensorflow.keras.optimizers.schedules import ExponentialDecay
-
+import pickle
 
 logging.getLogger('tensorflow').setLevel(logging.ERROR)
 
@@ -33,78 +33,101 @@ for gpu in gpus:
     tf.config.experimental.set_memory_growth(gpu, True)
 
 
-def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=False, inputs=None, split=None,\
-                   physics_guided=None, filt_alt=None, num=0, split_num=0, augment= False):
+def run_experiment(data_folder, model_name, batch_size, epochs, W=256, inputs=None, loss_type=None, filt_alt=None, num=0, \
+                   augment= False, split_num = 0):
 
     print(f"Running experiment with model={model_name}, batch_size={batch_size}, epochs={epochs}, inputs = {inputs}")
-
-    # Gather input and target data 
-    total_data, total_times, data_targets, labels = data
-    cosine_months, sine_months, cos_to_month = get_months_vectorized(total_times['lst'])
-    lat, lon = get_lat_lon(labels)
-    discharge = get_discharge(labels, total_times['lst'])
-    additional_inputs = np.column_stack((cosine_months, sine_months, lat, lon, discharge))
-
     
-    grad_output_folder = f'../plots/grad_cam/{model_name}/exp_{num}'
-    os.makedirs(grad_output_folder, exist_ok=True)
-
-    # Calculate global min and max for each variable
-    global_ranges = {}
-    for inp in inputs:  
-        all_images = total_data[inp]  
-        global_min = np.min(all_images)
-        global_max = np.max(all_images)
-        global_ranges[inp] = (global_min, global_max)
-        print(f"Variable: {inp}, Min: {global_min}, Max: {global_max}")
+    with open('../data/external/cos_to_month.pkl', 'rb') as file:
+        cos_to_month = pickle.load(file)
+        
+    train_dir = os.path.join(data_folder, 'train')
+    validation_dir = os.path.join(data_folder, 'validation')
+    test_dir = os.path.join(data_folder, 'test')
     
-    # Adapt input shapes and normalize
-    expanded_images = []
-    for inp in inputs:  
-        all_images = total_data[inp]  
-        min_val, max_val = global_ranges[inp]  
-        normalized_images = normalize_min_max(all_images, min_val, max_val)
-        if normalized_images.ndim == 3:  
-            normalized_images = np.expand_dims(normalized_images, axis=-1)  
-        expanded_images.append(normalized_images)
-    combined_input = np.concatenate(expanded_images, axis=-1)  
-    input_data = combined_input
-
-    # Split data
-    print('split', split)
-    train_index, validation_index, test_index = get_split_index(split[0], input_data, data_targets, labels, split_num, filt_alt)
-    validation_input = input_data[validation_index, :] 
-    validation_target = data_targets[validation_index]
-    test_input = input_data[test_index, :]
-    test_target = data_targets[test_index]
-    train_input = input_data[train_index, :]
-    train_target = data_targets[train_index]
+    # Load train data
+    train_input = np.load(os.path.join(train_dir, 'input_data.npy'))
+    train_target = np.load(os.path.join(train_dir, 'target_data.npy'))
+    additional_inputs_train = np.load(os.path.join(train_dir, 'additional_inputs.npy'))
     
-    additional_inputs_train = additional_inputs[train_index, :]
-    additional_inputs_validation = additional_inputs[validation_index, :]
-    additional_inputs_test = additional_inputs[test_index, :]
+    # Load validation data
+    validation_input = np.load(os.path.join(validation_dir, 'input_data.npy'))
+    validation_target = np.load(os.path.join(validation_dir, 'target_data.npy'))
+    additional_inputs_validation = np.load(os.path.join(validation_dir, 'additional_inputs.npy'))
+    
+    # Load test data
+    test_input = np.load(os.path.join(test_dir, 'input_data.npy'))
+    test_target = np.load(os.path.join(test_dir, 'target_data.npy'))
+    additional_inputs_test = np.load(os.path.join(test_dir, 'additional_inputs.npy'))
+    input_shape = train_input.shape[1:]
 
-    # Adapt input to condition
-    if len(train_input.shape) == 3:
-        input_shape = train_input.shape[1:]+(1,)
+    # Define the variables and their positions or channels
+    var_channels = {'lst': 0, 'ndvi': 1, 'slope': 2, 'altitude': 3, 'direction': 4}
+    var_position = {'month': [0, 1], 'coords': [2, 3], 'discharge': 4}
+    
+    # Initialize inputs
+    train_image_inputs = []  # To store image-based inputs
+    train_vector_inputs = []  # To store vector-based inputs
+    
+    val_image_inputs = []
+    val_vector_inputs = []
+    
+    test_image_inputs = []
+    test_vector_inputs = []
+    
+    # Build the inputs based on the variables in the list `inputs`
+    for inp in inputs:
+        if inp in var_channels:
+            # Add image channels
+            channel = var_channels[inp]
+            train_image_inputs.append(train_input[..., channel:channel + 1])  # Slicing to preserve dimensions
+            val_image_inputs.append(validation_input[..., channel:channel + 1])
+            test_image_inputs.append(test_input[..., channel:channel + 1])
+        elif inp in var_position:
+            # Add vector-based inputs from `additional_inputs`
+            position = var_position[inp]
+            if isinstance(position, list):
+                train_vector_inputs.append(additional_inputs_train[:, position])
+                val_vector_inputs.append(additional_inputs_validation[:, position])
+                test_vector_inputs.append(additional_inputs_test[:, position])
+            else:
+                train_vector_inputs.append(additional_inputs_train[:, position:position + 1])
+                val_vector_inputs.append(additional_inputs_validation[:, position:position + 1])
+                test_vector_inputs.append(additional_inputs_test[:, position:position + 1])
+    
+    # Combine image inputs along the last axis
+    train_image_inputs = np.concatenate(train_image_inputs, axis=-1) if train_image_inputs else None
+    val_image_inputs = np.concatenate(val_image_inputs, axis=-1) if val_image_inputs else None
+    test_image_inputs = np.concatenate(test_image_inputs, axis=-1) if test_image_inputs else None
+    
+    # Combine vector inputs along the last axis
+    train_vector_inputs = np.concatenate(train_vector_inputs, axis=-1) if train_vector_inputs else None
+    val_vector_inputs = np.concatenate(val_vector_inputs, axis=-1) if val_vector_inputs else None
+    test_vector_inputs = np.concatenate(test_vector_inputs, axis=-1) if test_vector_inputs else None
+    
+    # Adjust input_args and model_input format
+    if train_vector_inputs is not None:  # If vector inputs are present
+        input_args = (train_image_inputs.shape[1:], train_vector_inputs.shape[1])
+        train_model_input = [train_image_inputs, train_vector_inputs]
+        val_model_input = [val_image_inputs, val_vector_inputs]
+        test_model_input = [test_image_inputs, test_vector_inputs]
+    else:  # Only image inputs
+        input_args = train_image_inputs.shape[1:]
+        train_model_input = train_image_inputs
+        val_model_input = val_image_inputs
+        test_model_input = test_image_inputs
+    
+    # Print shapes for verification
+    if isinstance(train_model_input, list):
+        print(f"Train model input shapes: {[x.shape for x in train_model_input]}")
     else:
-        input_shape = train_input.shape[1:]
+        print(f"Train model input shape: {train_model_input.shape}")
 
-    if conditioned:
-        input_args = (input_shape, additional_inputs.shape[1])
-        model_input = [train_input, additional_inputs_train]
-        val_model_input = [validation_input, additional_inputs_validation]
-        test_model_input = [test_input, additional_inputs_test]
-    else:
-        input_args = input_shape
-        model_input = train_input
-        val_model_input = validation_input
-        test_model_input = test_input
 
     
     # Start model
     print('INPUT SHAPE',input_args)
-    model = build_model_map(model_name, input_args, conditioned, W, train_input)
+    model = build_model_map(model_name, input_args, W)
     start_time = time.time()
         
     summary_file = f"../models/{model_name}_summary.txt"
@@ -113,12 +136,27 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
             model.summary()
     
     # Create batch dataset
-    dataset = tf.data.Dataset.from_tensor_slices((*model_input, train_target) if conditioned else (model_input, train_target))
+    conditioned = len(train_model_input)==2
+    if conditioned:
+        dataset = tf.data.Dataset.from_tensor_slices(((train_model_input[0], train_model_input[1]), train_target))
+    else:
+        dataset = tf.data.Dataset.from_tensor_slices((train_model_input, train_target))
+        
+    for inputss, label in dataset.take(1):
+        print("Image Stack Shape:", inputss[0].shape)  # (64, 64, 5)
+        print("Scalars Shape:",  inputss[1].shape)     # (5,)
+        print("Label Shape:", label.shape) 
+    
     if augment:
         # Duplicate the dataset for augmentation
-        augmented_dataset = (
-            dataset.map(lambda image, label: augment_data(image, label), num_parallel_calls=tf.data.AUTOTUNE)  # Augmentation
+        if conditioned:
+            augmented_dataset = (
+            dataset.map(lambda inputs, label: augment_data(inputs[0], label, inputs[1]), num_parallel_calls=tf.data.AUTOTUNE)  # Augmentation
         )
+        else:
+            augmented_dataset = (
+                dataset.map(lambda image, label: augment_data(image, label), num_parallel_calls=tf.data.AUTOTUNE)  # Augmentation
+            )
         
         # Combine original and augmented datasets
         dataset = dataset.concatenate(augmented_dataset)
@@ -128,40 +166,46 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
     dataset_val = tf.data.Dataset.from_tensor_slices((*val_model_input, validation_target) if conditioned else (val_model_input, validation_target))
     dataset_val = dataset_val.batch(batch_size).cache().prefetch(tf.data.AUTOTUNE)
 
-    sample_image, sample_label = next(iter(dataset))  # Take one batch
-    augmented_images = [augment_data(sample_image[0], sample_label[0])[0].numpy() for _ in range(10)]
-    # Save a grid plot of augmented images
-    plt.figure(figsize=(15, 5))
-    for i, aug_img in enumerate(augmented_images):
-        plt.subplot(2, 5, i + 1)
-        plt.imshow(aug_img[:, :, :3])  # Show only the RGB channels
-        plt.title(f"Augmented {i+1}")
-        plt.axis("off")
-    plt.tight_layout()
-    # Save the plot
-    output_plot_path = "../plots/augmented_examples_plot.png"
-    plt.savefig(output_plot_path, dpi=300)
-
-    output_file = "../official_results/augmentation_report.txt"
-    # Count images in original and augmented datasets
-    original_images_count = count_images(dataset)  # Assuming `dataset` is your original dataset
-    augmented_images_count = count_images(augmented_dataset)  # Assuming `augmented_dataset` contains augmented images
+    if augment:
+        sample_image, sample_label = next(iter(dataset))  # Take one batch
+        augmented_images = [
+                            augment_data(sample_image[0], sample_label[0])[0].numpy()
+                            if not conditioned
+                            else augment_data(sample_image[0][0], sample_label[0])[0].numpy()
+                            for _ in range(10)
+                        ]
+        # Save a grid plot of augmented images
+        plt.figure(figsize=(15, 5))
+        for i, aug_img in enumerate(augmented_images):
+            plt.subplot(2, 5, i + 1)
+            plt.imshow(aug_img[:, :, :3])  # Show only the RGB channels
+            plt.title(f"Augmented {i+1}")
+            plt.axis("off")
+        plt.tight_layout()
+        # Save the plot
+        output_plot_path = "../plots/augmented_examples_plot.png"
+        plt.savefig(output_plot_path, dpi=300)
     
-    # Write the counts to a text file
-    with open(output_file, "w") as f:
-        f.write("Augmentation Report\n")
-        f.write("===================\n")
-        f.write(f"Original images: {original_images_count}\n")
-        f.write(f"Augmented images: {augmented_images_count}\n")
-        f.write(f"Total images (original + augmented): {original_images_count + augmented_images_count}\n")
+        output_file = "../official_results/augmentation_report.txt"
+        # Count images in original and augmented datasets
+        original_images_count = count_images(dataset)  # Assuming `dataset` is your original dataset
+        augmented_images_count = count_images(augmented_dataset)  # Assuming `augmented_dataset` contains augmented images
+        
+        # Write the counts to a text file
+        with open(output_file, "w") as f:
+            f.write("Augmentation Report\n")
+            f.write("===================\n")
+            f.write(f"Original images: {original_images_count}\n")
+            f.write(f"Augmented images: {augmented_images_count}\n")
+            f.write(f"Total images (original + augmented): {original_images_count + augmented_images_count}\n")
 
     
 
     #initial_lr = 0.01
     #lr_schedule = ExponentialDecay(initial_lr, decay_steps=50, decay_rate=0.96, staircase=True)
     #optimizer = tf.keras.optimizers.SGD(learning_rate=lr_schedule, momentum=0.9, nesterov=True)
-    optimizer = tf.keras.optimizers.SGD()
-    #optimizer = tf.keras.optimizers.Adam()
+    #optimizer = tf.keras.optimizers.SGD()
+    optimizer = tf.keras.optimizers.Adam()
     errors_log = {"epoch": [], "month": [], "error": []}
     loss_per_epoch = []
     val_loss_per_epoch = []
@@ -174,7 +218,7 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
      
     
     # Early Stopping parameters
-    patience = 300  # Number of epochs with no improvement before stopping
+    patience = 30  # Number of epochs with no improvement before stopping
     min_delta = 1e-4  # Minimum improvement required to consider progress
     best_val_loss = float('inf')  # Best observed validation loss
     wait = 0  # Counter for epochs without improvement
@@ -184,6 +228,8 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
         epoch_loss = 0  
         num_batches = 0
         start_idx = 0
+        dataset = dataset.shuffle(buffer_size=len(dataset))
+        
         for batch in dataset:
             if conditioned:
                 model_input_batch = batch[:-1]  
@@ -196,9 +242,13 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
                 y_pred = model([*model_input_batch], training=True) if conditioned else model(model_input_batch, training=True)
                 
                 # Compute loss based on the selected method
-                if physics_guided:
+                if loss_type == 'Physics_guided':
                     lst_batch = model_input_batch[0][:, :, :, :3] if conditioned else model_input_batch[:, :, :, :3]
                     loss = conservation_energy_loss(target_batch, y_pred, lst_batch, alpha=0.5, beta=0.5)
+                elif loss_type == 'RMSE_sensitive':
+                    loss = rmse_extreme_sensitive(target_batch, y_pred, k1=0.01, k2=1.0, alpha=1.0)
+                elif loss_type == 'RMSE_focal':
+                    loss = rmse_focal(target_batch, y_pred, gamma=1.0)
                 else:
                     loss = root_mean_squared_error(target_batch, y_pred) 
             
@@ -301,19 +351,22 @@ def run_experiment(data, model_name, batch_size, epochs, W=256, conditioned=Fals
     current_time = datetime.now().strftime("%H:%M:%S")
     
     # Save model results
-    opt = 'Adam'#'SGD w/ dynamic-lr, momentum 0.9 & nesterov'#'Adam' #SGD
-    laabeel = 'month, discharge, lat, lon' if conditioned else None
-    var_inputs = '' if inputs == None else ', '.join(inputs)
-    variables = ', '.join([var_inputs, laabeel]) if conditioned else var_inputs
-    inp_str = f'{len(np.unique(labels))} cells + augmented' if augment else f'{len(np.unique(labels))} cells'
-    details = {'Experiment':num,'RMSE':rmse_test,'Variables':variables,'Input': inp_str, 'Split': split[0], \
-               'Split_id': split_num,'Optimizer': opt,'nº samples': len(data_targets), 'Batch size': batch_size, \
+    if isinstance(optimizer, tf.keras.optimizers.Adam):
+        opt = 'Adam'
+    elif isinstance(optimizer, tf.keras.optimizers.SGD):
+        opt = 'SGD'
+        
+    variables = '' if inputs == None else ', '.join(inputs)
+    samples_str = f'{count_images(dataset)} images + {augmented_images_count} augmented' if augment else f'{count_images(dataset)} images'
+
+    details = {'Experiment':num,'RMSE':rmse_test,'Variables':variables, 'Split_id': split_num,'Optimizer': opt, \
+               'nº samples': samples_str, 'Batch size': batch_size, \
                'Epochs': f'{num_final_epochs} of {epochs}','Date':current_date,'Time':current_time, 'Duration': duration, \
-               'Loss':  'Physics-guided' if physics_guided else 'RMSE', 'Resolution':W}
-    
+               'Loss':  loss_type, 'Resolution':W}
+     
     file_path = f"../official_results/{model_name}_results.xlsx"
     save_excel(file_path, details, excel = 'Results')
-    #model.save(f'../models/{model_name}.h5')
+    model.save(f'../models/{model_name}.h5')
     print(model.summary())
     if conditioned:
         print(f"Experiment {model_name} with batch_size={batch_size} and epochs={epochs} completed and {input_shape, additional_inputs.shape} inputs .\n")
@@ -336,11 +389,11 @@ if __name__ == '__main__':
     parser.add_argument('--inputs', nargs='+', type=str, required=True,
                         help="List of inputs to include . Example: --inputs lst ndvi")
 
-    parser.add_argument('--split', nargs='+', type=str, required=True,
-                        help="Type of data split . Example: --split random, time, stratified")
-
     parser.add_argument('--resolution', nargs='+', type=int, required=True,
-                        help="Type of data split . Example: --split random, time, stratified")
+                        help="Image Resolution. Example: --resolution 64")
+
+    parser.add_argument('--loss_type', nargs='+', type=str, required=True,
+                        help="Type of loss . Example: --loss_type RMSE, RMSE_sensitive, Physics_guided")
 
     # Parse arguments
     args = parser.parse_args()
@@ -350,38 +403,27 @@ if __name__ == '__main__':
     epochs_list = args.epochs_list
     model_names = args.model_names
     inputs = args.inputs
-    split = args.split
     W = args.resolution[0]
+    loss_type = args.loss_type[0]
     
-    if W==128:
-        data_folder = '../data/preprocessed/'
-    else:
-        data_folder = f'../data/preprocessed/{W}x{W}/'
+    print(inputs)
+    if inputs[0] == 'full features':
+        inputs = ['lst', 'ndvi','slope','altitude','direction','month','coords','discharge']
+    elif inputs[0] == 'image features':
+        inputs = ['lst', 'ndvi','slope','altitude','direction']
+        
         
     filt_alt = False 
-    augment = True
+    augment = False
     
-    data = load_all_data(
-    source_folder='../data/external/shp/river_cells_oficial',
-    source_path=data_folder,
-    data_paths= inputs,
-    filter_altitude=filt_alt,
-    W=W,
-    time_split=True if split=='time' else False)
-    
-
     # Run experiments with parameter combinations
     for model_name in model_names:
         exp_num = get_next_experiment_number(f'../official_results/{model_name}_results.xlsx')
         for batch_size in batch_sizes:
             for epochs in epochs_list:
-                #run_experiment(data, model_name, batch_size, epochs, W=W, conditioned=False, inputs=inputs, split=split, physics_guided=True, \
-                               #filt_alt=filt_alt, num = exp_num)
                 #for c in [True, False]:
-                run_experiment(data, model_name, batch_size, epochs, W=W, conditioned=True, inputs=inputs, split=split, physics_guided=False, \
-                              filt_alt=filt_alt, num = exp_num, split_num = 1, augment = augment)
-                run_experiment(data, model_name, batch_size, epochs, W=W, conditioned=True, inputs=inputs, split=split, physics_guided=False, \
-                              filt_alt=filt_alt, num = exp_num+1, split_num = 2, augment = augment)
-                run_experiment(data, model_name, batch_size, epochs, W=W, conditioned=True, inputs=inputs, split=split, physics_guided=False, \
-                              filt_alt=filt_alt, num = exp_num+2, split_num = 3, augment = augment)
+                for split in range(1,6):
+                    data_folder = f'../data/processed_data/{W}x{W}/{split}'
+                    run_experiment(data_folder, model_name, batch_size, epochs, W=W, inputs=inputs, \
+                                   loss_type=loss_type, filt_alt=filt_alt, num = exp_num, augment = augment, split_num = split)
                 
