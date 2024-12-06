@@ -1,0 +1,6 @@
+Augmentation Report
+===================
+Original images: 4600
+Augmented normal images: 107008
+Augmented outliers: 187392
+Total images (original + augmented): 294400

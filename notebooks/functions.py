@@ -691,6 +691,8 @@ def load_all_data(
             total_times[k] = times_list
             print(f"{k} : {total_data[k].shape}")
 
+    origin_folder = source_path.split(f'{W}x{W}')[0]
+    print(origin_folder,'ole')
     # Cargar variables adicionales
     for k, v in all_dir_paths.items():
         if k in ['direction', 'slope', 'altitude']:
@@ -700,7 +702,7 @@ def load_all_data(
                 for file in v:
                     if lab in file.split('/')[-1] or lab in file.split('.')[0]:
                         if lab not in imgss:
-                            file_path = os.path.join(file, os.listdir(file)[0]) if k != 'altitude' else os.path.join(f'{source_path}altitude', file)
+                            file_path = os.path.join(file, os.listdir(file)[0]) if k != 'altitude' else os.path.join(f'{origin_folder}altitude', file)
                             r, m = load_raster(file_path, False)
                             var = resize_image(r, W, W)
                             var = np.where(np.isnan(var), 0.0, var)
@@ -714,7 +716,7 @@ def load_all_data(
             print(f"{k}: {np.array(total).shape}")
 
     # Cargar variable objetivo
-    water_temp = pd.read_csv(f'{source_path}wt/water_temp.csv', index_col=0)
+    water_temp = pd.read_csv(f'{origin_folder}wt/water_temp.csv', index_col=0)
     times_ordered = total_times['lst']
     wt_temp = []
     for cell, date in zip(labels, times_ordered):
@@ -977,7 +979,7 @@ def rotate_image(image, max_angle_degrees=10):
     return tf.squeeze(rotated_image, axis=0)  # Remove batch dimension
 
 
-def augment_data(image, label, additional_inp=None):
+def augment_data_v0(image, label, additional_inp=None):
     """
     Apply data augmentation using TensorFlow image processing functions.
     Args:
@@ -996,7 +998,7 @@ def augment_data(image, label, additional_inp=None):
     lst_rgb = image[:, :, :3]
     other_variables = image[:, :, 3:]
 
-    # Brightness and contrast adjustments (RGB only)
+    # Brightness and contrast adjustments (RGB only) 
     lst_rgb = tf.image.random_brightness(lst_rgb, max_delta=brightness_delta)
     lst_rgb = tf.image.random_contrast(lst_rgb, lower=contrast_lower, upper=contrast_upper)
 
@@ -1017,7 +1019,7 @@ def augment_data(image, label, additional_inp=None):
         return (full_image, additional_inp), label
 
     return full_image, label
-    
+
 def count_images(dataset):
     """
     Count the total number of images in a dataset.
@@ -1027,9 +1029,272 @@ def count_images(dataset):
         Total number of images in the dataset.
     """
     total_images = 0
-    for images, _ in dataset:  # Iterate over (image, label) pairs
-        if len(images)>1:
+    for _, images, _ in dataset:  # Iterate over (image, label) pairs
+        # Check if `images` is a list/tuple (multiple inputs to the model)
+        if isinstance(images, (list, tuple)):
+            # Add the number of samples in the first input (usually the primary data)
             total_images += images[0].shape[0]
         else:
-            total_images += images.shape[0]  # Add the batch size
+            # Single input case
+            total_images += images.shape[0]
     return total_images
+
+
+def augment_data_v1(inputs_label, additional_inputs=False, is_outlier=False): # reference = (month, coords)
+    if additional_inputs:
+        image = inputs_label[0][0]
+        additional_inp = inputs_label[0][1]
+        label = inputs_label[1]
+    else:
+        image = inputs_label[0]
+        label = inputs_label[1]
+        
+    # is_outlier = outlier_mask[(reference, label)] # True
+    
+    # Generate augmented images
+    rotations = [
+        image,  # 0°
+        tf.image.rot90(image, k=1),  # 90°
+        tf.image.rot90(image, k=2),  # 180°
+        tf.image.rot90(image, k=3),  # 270°
+    ]
+    if is_outlier:
+        rotations += [tf.identity(rot) for rot in rotations]  # Duplicate for outliers
+
+    # Ensure all outputs have the same rank
+    if additional_inputs:
+        augmented_outputs = [
+            ((rot, tf.convert_to_tensor(additional_inp)), tf.convert_to_tensor(label)) for rot in rotations
+        ]
+    else:
+        augmented_outputs = [
+            (rot, tf.convert_to_tensor(label)) for rot in rotations
+        ]
+    return augmented_outputs
+
+def augment_data_v2(idx, inputs_label, reference, outlier_mask, additional_inputs=False, visualize = False): 
+
+    if additional_inputs:
+        image = tf.cast(inputs_label[0][0], dtype=tf.float32)
+        additional_inp = tf.cast(inputs_label[0][1], dtype=tf.float32)
+        label = tf.cast(inputs_label[1], dtype=tf.float32)
+    else:
+        image = tf.cast(inputs_label[0], dtype=tf.float32)
+        label = tf.cast(inputs_label[1], dtype=tf.float32)
+    
+    reference = (tf.cast(reference[0], dtype=tf.float32), tf.cast(reference[1], dtype=tf.float32))
+    reference_month = tf.gather(reference[0], idx)
+    reference_coords = tf.gather(reference[1], idx)
+
+    reference_month = tf.expand_dims(reference_month, axis=0)  # Convierte a [1]
+    label = tf.expand_dims(label, axis=0)  # Convierte a [1]
+    
+    def create_outlier_key(month, coords, lbl):
+        # Asegurar que las coordenadas son una tupla y los valores son flotantes
+        python_key = (float(month.numpy()), tuple(map(float, coords.numpy())), float(lbl.numpy()))
+        return python_key
+    
+    # Convertir `reference_coords` en una tupla de Python directamente
+    def get_outlier_status(month, coords, lbl):
+        # Crear la clave como tupla compatible con las del diccionario
+        python_key = (float(month), tuple(map(float, coords)), float(lbl))
+        return outlier_mask.get(python_key, False)
+    
+    # Usar `tf.py_function` para consultar el diccionario
+    is_outlier = tf.py_function(
+        func=lambda month, coords, lbl: get_outlier_status(month, coords, lbl),
+        inp=[reference_month, reference_coords, label],
+        Tout=tf.bool
+    ) 
+
+    # Generate augmented images
+    base_rotations = [
+        image,  # 0°
+        tf.image.rot90(image, k=1),  # 90°
+        tf.image.rot90(image, k=2),  # 180°
+        tf.image.rot90(image, k=3),  # 270°
+    ]
+   
+    rotations = tf.cond(
+        is_outlier,
+        lambda: base_rotations + base_rotations,  # if is_outlier duplicate rotations
+        lambda: base_rotations + [tf.zeros_like(base_rotations[0]) for _ in base_rotations]  # if not is_outlier fill in with False
+    )
+    valid_mask = tf.logical_not(tf.reduce_all(tf.equal(rotations, 0), axis=[1, 2, 3]))
+    rotations = tf.boolean_mask(rotations, valid_mask)
+
+    def pack_output(rot):
+        if additional_inputs:
+            return ((rot, tf.convert_to_tensor(additional_inp)), label)
+        else:
+            return (rot, label)
+
+    augmented_outputs = tf.map_fn(pack_output, rotations, fn_output_signature=(tf.TensorSpec(None, tf.float32), tf.TensorSpec(None, tf.float32)))
+    
+    if visualize:
+        visualize_augmented_outputs = [
+            {"image": rot, "label": label, "is_outlier": is_outlier} for rot in rotations
+        ]
+        return visualize_augmented_outputs
+
+            
+    return augmented_outputs
+
+def augment_data(idx, inputs_label, reference, outlier_mask, additional_inputs=False, visualize=False): 
+    if additional_inputs:
+        image = tf.cast(inputs_label[0][0], dtype=tf.float32)
+        additional_inp = tf.cast(inputs_label[0][1], dtype=tf.float32)
+        label = tf.cast(inputs_label[1], dtype=tf.float32)
+    else:
+        image = tf.cast(inputs_label[0], dtype=tf.float32)
+        label = tf.cast(inputs_label[1], dtype=tf.float32)
+    
+    reference = (tf.cast(reference[0], dtype=tf.float32), tf.cast(reference[1], dtype=tf.float32))
+    reference_month = tf.gather(reference[0], idx)
+    reference_coords = tf.gather(reference[1], idx)
+
+    reference_month = tf.expand_dims(reference_month, axis=0)  # Convierte a [1]
+    label = tf.expand_dims(label, axis=0) 
+
+    def get_outlier_status(month, coords, lbl):
+        python_key = (float(month), tuple(map(float, coords)), float(lbl))
+        return outlier_mask.get(python_key, False)
+    
+    is_outlier = tf.py_function(
+        func=lambda month, coords, lbl: get_outlier_status(month, coords, lbl),
+        inp=[reference_month, reference_coords, label],
+        Tout=tf.bool
+    )
+
+    # Generate augmented images
+    base_rotations = [
+        image,  # 0°
+        tf.image.rot90(image, k=1),  # 90°
+        tf.image.rot90(image, k=2),  # 180°
+        tf.image.rot90(image, k=3),  # 270°
+    ]
+
+    rotations = tf.cond(
+        is_outlier,
+        lambda: base_rotations + base_rotations,  # 7 augmentations for outliers
+        lambda: base_rotations + [tf.zeros_like(base_rotations[0]) for _ in base_rotations] # 4 augmentations for non-outliers
+    )
+
+    valid_mask = tf.logical_not(tf.reduce_all(tf.equal(rotations, 0), axis=[1, 2, 3]))
+    rotations = tf.boolean_mask(rotations, valid_mask)
+    num_channels = tf.get_static_value(tf.shape(image)[-1])
+    rotations = tf.map_fn(
+                    lambda rot: tf.ensure_shape(rot, [64, 64, num_channels]),
+                    rotations
+                )
+
+
+    def pack_output(rot):
+        if additional_inputs:
+            return idx, (rot, tf.convert_to_tensor(additional_inp)), label
+        else:
+            return idx, rot, label
+
+    if visualize:
+        visualize_augmented_outputs = [
+            {"image": rot, "label": label, "is_outlier": is_outlier} for rot in rotations
+        ]
+        return visualize_augmented_outputs
+        
+    augmented_dataset = tf.data.Dataset.from_tensor_slices(rotations).map(
+        lambda rot: pack_output(rot),
+        num_parallel_calls=tf.data.AUTOTUNE
+    )
+    
+    augmented_dataset = augmented_dataset.concatenate(augmented_dataset).concatenate(augmented_dataset)
+
+    return augmented_dataset
+
+
+
+    
+def load_set(data_folder, inputs, split_set, var_channels, var_position):
+    
+    set_dir = os.path.join(data_folder, split_set)
+    input_data = np.load(os.path.join(set_dir, 'input_data.npy'))
+    target = np.load(os.path.join(set_dir, 'target_data.npy'))
+    additional_inputs = np.load(os.path.join(set_dir, 'additional_inputs.npy'))
+
+    # Initialize inputs
+    image_inputs = []  # To store image-based inputs
+    vector_inputs = []  # To store vector-based inputs
+    
+    # Build the inputs based on the variables in the list `inputs`
+    for inp in inputs:
+        if inp in var_channels: # Add image channels
+            channel = var_channels[inp] 
+            image_inputs.append(input_data[..., channel:channel + 1])  # Slicing to preserve dimensions
+            
+        elif inp in var_position: # Add vector-based inputs from `additional_inputs`
+            position = var_position[inp]
+            if isinstance(position, list):
+                vector_inputs.append(additional_inputs[:, position])
+            else:
+                vector_inputs.append(additional_inputs[:, position:position + 1])
+                
+    # Combine image inputs along the last axis
+    image_inputs = np.concatenate(image_inputs, axis=-1) if image_inputs else None
+    
+    # Combine vector inputs along the last axis
+    vector_inputs = np.concatenate(vector_inputs, axis=-1) if vector_inputs else None
+    
+    if vector_inputs is not None:  # If vector inputs are present
+        input_args = (image_inputs.shape[1:], vector_inputs.shape[1])
+        model_input = [image_inputs, vector_inputs]
+        
+    else:  # Only image inputs
+        input_args = image_inputs.shape[1:]
+        model_input = image_inputs
+        
+    if isinstance(model_input, list):
+        print(f"{split_set} model input shapes: {[x.shape for x in model_input]}")
+    else:
+        print(f"{split_set} model input shape: {model_input.shape}")
+        
+    return model_input, additional_inputs, target
+
+def prepare_dataset_v0(ds, target, conditioned, reference=None, augment=False):
+    inputs = (ds[0], ds[1]) if conditioned else ds
+    dataset = tf.data.Dataset.from_tensor_slices((inputs, target))
+    
+    if augment:
+        dataset_with_index = dataset.enumerate()
+        with open('../data/external/outlier_dict.json', 'r') as json_file:
+            loaded_dict = json.load(json_file)
+
+        outlier_mask = {eval(key): value for key, value in loaded_dict.items()}
+
+        dataset = dataset_with_index.map( \
+            lambda idx, inputs_target: (augment_data(idx, inputs_target, reference, outlier_mask, \
+                                                     additional_inputs = conditioned, visualize = False)), \
+                                        num_parallel_calls=tf.data.AUTOTUNE)
+    return dataset
+
+def prepare_dataset(ds, target, conditioned, reference=None, augment=False):
+    inputs = (ds[0], ds[1]) if conditioned else ds
+    dataset = tf.data.Dataset.from_tensor_slices((inputs, target))
+    
+    dataset_with_indices = dataset.enumerate() 
+    
+    if augment:
+        with open('../data/external/outlier_dict.json', 'r') as json_file:
+            loaded_dict = json.load(json_file)
+        outlier_mask = {eval(key): value for key, value in loaded_dict.items()}
+
+        def augment_with_index(idx, inputs_target):
+            augmented = augment_data(
+                idx, inputs_target, reference, outlier_mask,
+                additional_inputs=conditioned, visualize=False
+            )
+            return augmented
+
+        dataset_with_indices = dataset_with_indices.flat_map(
+            augment_with_index
+        )
+    
+    return dataset_with_indices
