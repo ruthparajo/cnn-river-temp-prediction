@@ -50,7 +50,7 @@ def run_experiment(data_folder, model_name, batch_size, epochs, W=256, inputs=No
     var_position = {'month': [0, 1], 'coords': [2, 3], 'discharge': 4}
     with open('../data/external/cos_to_month.pkl', 'rb') as file:
         cos_to_month = pickle.load(file)
-        
+    print(inputs)
     train_model_input, train_additional_inputs, train_target = load_set(data_folder, inputs, 'train', var_channels, var_position)
     val_model_input, validation_additional_inputs, validation_target = load_set(data_folder, inputs, 'validation', var_channels, var_position)
     test_model_input, test_additional_inputs, test_target = load_set(data_folder, inputs, 'test', var_channels, var_position)
@@ -58,16 +58,12 @@ def run_experiment(data_folder, model_name, batch_size, epochs, W=256, inputs=No
     months = [cos_to_month[val] for val in train_additional_inputs[..., var_position['month'][0]]]
     reference = (months, train_additional_inputs[..., var_position['coords']]) 
     conditioned = len(train_model_input) == 2
-    train_dataset = prepare_dataset(train_model_input, train_target, conditioned, reference, augment=True)
-    val_dataset = prepare_dataset(val_model_input, validation_target, conditioned, augment=False)
-
-    conditioned = len(train_model_input) == 2
     
-    # Display shapes for verification
-    for idx, inputss, label in train_dataset.take(1):
-        print("Image Stack Shape:", inputss[0].shape)  # e.g., (64, 64, 5)
-        print("Scalars Shape:", inputss[1].shape)      # e.g., (5,)
-        print("Label Shape:", label.shape)
+    train_dataset = prepare_dataset(train_model_input, train_target, conditioned, W, reference, augment=augment)
+    val_dataset = prepare_dataset(val_model_input, validation_target, conditioned, W, augment=False)
+
+    
+    print('que',len(train_model_input), conditioned, train_model_input[0].shape,train_model_input[1].shape)
         
     # Finalize the datasets
     train_dataset = train_dataset.batch(batch_size).cache().prefetch(tf.data.AUTOTUNE)
@@ -75,7 +71,7 @@ def run_experiment(data_folder, model_name, batch_size, epochs, W=256, inputs=No
 
     # Start model
     if conditioned:
-        input_args = (train_model_input.shape[1:], train_additional_inputs.shape[1])
+        input_args = (train_model_input[0].shape[1:], train_model_input[1].shape[1])
     else:
         input_args = train_model_input.shape[1:]
         
@@ -107,16 +103,25 @@ def run_experiment(data_folder, model_name, batch_size, epochs, W=256, inputs=No
     for epoch in range(epochs):
         epoch_loss = 0  
         num_batches = 0
-        start_idx = 0
-        train_dataset = train_dataset.shuffle(buffer_size=len(train_model_input[0]))
+        train_dataset = train_dataset.shuffle(buffer_size=len(train_model_input)).prefetch(tf.data.AUTOTUNE)
         
         for batch in train_dataset:
-            if conditioned:
-                model_input_batch = batch[1:-1]  
-                target_batch = batch[-1] 
-                idx = batch[0]
+            if augment:
+                if conditioned:
+                    model_input_batch = batch[1:-1]  
+                    target_batch = batch[-1] 
+                    idx = batch[0]
+                else:
+                    idx, model_input_batch, target_batch = batch  # Direct unpacking for a single dataset
             else:
-                idx, model_input_batch, target_batch = batch  # Direct unpacking for a single dataset
+                if conditioned:
+                    model_input_batch = batch[1][0]
+                    target_batch = batch[1][1]  
+                    idx = batch[0]
+                else:
+                    idx, batch_data = batch
+                    model_input_batch = batch_data[:-1]
+                    target_batch = batch_data[-1]
             
             with tf.GradientTape() as tape:
                 # Forward pass
@@ -124,7 +129,7 @@ def run_experiment(data_folder, model_name, batch_size, epochs, W=256, inputs=No
                 
                 # Compute loss based on the selected method
                 if loss_type == 'Physics_guided':
-                    lst_batch = model_input_batch[0][:, :, :, :3] if conditioned else model_input_batch[:, :, :, 0]
+                    lst_batch = model_input_batch[0][:, :, :, :0] if conditioned else model_input_batch[:, :, :, 0]
                     loss = conservation_energy_loss(target_batch, y_pred, lst_batch, alpha=0.5, beta=0.5)
                 elif loss_type == 'RMSE_sensitive':
                     loss = rmse_extreme_sensitive(target_batch, y_pred, k1=0.01, k2=1.0, alpha=1.0)
@@ -132,7 +137,6 @@ def run_experiment(data_folder, model_name, batch_size, epochs, W=256, inputs=No
                     loss = rmse_focal(target_batch, y_pred, gamma=1.0)
                 else:
                     loss = root_mean_squared_error(target_batch, y_pred) 
-            
             # Calculate gradients and apply optimization
             gradients = tape.gradient(loss, model.trainable_variables)
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
@@ -155,7 +159,6 @@ def run_experiment(data_folder, model_name, batch_size, epochs, W=256, inputs=No
                 errors_log["epoch"].append(epoch + 1)
                 errors_log["month"].append(cos_to_month[cos])
                 errors_log["error"].append(rmse_value)
-            start_idx += current_batch_size
                     
         avg_epoch_loss = epoch_loss / num_batches
         loss_per_epoch.append(avg_epoch_loss)
@@ -166,8 +169,8 @@ def run_experiment(data_folder, model_name, batch_size, epochs, W=256, inputs=No
         
         for val_batch in val_dataset:
             if conditioned:
-                val_input_batch = val_batch[1][1:-1]  
-                val_target_batch = val_batch[1][-1]  
+                val_input_batch = val_batch[1][0]  
+                val_target_batch = val_batch[1][1]  
                 idx = val_batch[0]
             else:
                 idx, batch_data = val_batch
@@ -245,7 +248,7 @@ def run_experiment(data_folder, model_name, batch_size, epochs, W=256, inputs=No
         opt = 'SGD'
         
     variables = '' if inputs == None else ', '.join(inputs)
-    samples_str = f'{count_images(train_dataset)} images'
+    samples_str = f'{count_images(train_dataset,augment)} images'
 
     details = {'Experiment':num,'RMSE':rmse_test,'Variables':variables, 'Split_id': split_num,'Optimizer': opt, \
                'nº samples': samples_str, 'Batch size': batch_size, \
@@ -253,13 +256,14 @@ def run_experiment(data_folder, model_name, batch_size, epochs, W=256, inputs=No
                'Loss':  loss_type, 'Resolution':W}
 
     if mode == 'Save':
+        print('SAVING MODEL AND RESULTS!')
         file_path = f"../official_results/{model_name}_results.xlsx"
         save_excel(file_path, details, excel = 'Results')
         model.save(f'../models/{model_name}.h5')
     elif mode == 'Show':
         print(details)
 
-    input_shape = train_model_input.shape[1:]
+    input_shape = train_model_input[0].shape
     
     if conditioned:
         print(f"Experiment {model_name} with batch_size={batch_size} and epochs={epochs} completed and {input_shape, train_additional_inputs.shape} inputs .\n")
@@ -296,6 +300,7 @@ if __name__ == '__main__':
     model_names = args.model_names
     inputs = args.inputs
     W = args.resolution[0]
+    resolutions = args.resolution
     loss_type = args.loss_type[0]
     
     print(inputs)
@@ -306,16 +311,18 @@ if __name__ == '__main__':
         
         
     filt_alt = False 
-    augment = True
+    augment = False
+    epochs=300
     
     # Run experiments with parameter combinations
     for model_name in model_names:
         exp_num = get_next_experiment_number(f'../official_results/{model_name}_results.xlsx')
         for batch_size in batch_sizes:
-            for epochs in epochs_list:
+            for W in resolutions:
                 #for c in [True, False]:
                 for split in range(1,6):
                     data_folder = f'../data/processed_data/{W}x{W}/{split}'
                     run_experiment(data_folder, model_name, batch_size, epochs, W=W, inputs=inputs, \
-                                   loss_type=loss_type, filt_alt=filt_alt, num = exp_num, augment = augment, split_num = split, mode = 'Save')
+                                       loss_type=loss_type, filt_alt=filt_alt, num = exp_num, augment = augment, split_num = split, mode = 'Save')
+                    clear_memory()
                 

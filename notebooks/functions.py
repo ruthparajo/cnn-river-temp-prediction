@@ -702,7 +702,7 @@ def load_all_data(
                 for file in v:
                     if lab in file.split('/')[-1] or lab in file.split('.')[0]:
                         if lab not in imgss:
-                            file_path = os.path.join(file, os.listdir(file)[0]) if k != 'altitude' else os.path.join(f'{origin_folder}altitude', file)
+                            file_path = os.path.join(file, os.listdir(file)[0]) if k != 'altitude' else os.path.join(f'{source_path}altitude', file)
                             r, m = load_raster(file_path, False)
                             var = resize_image(r, W, W)
                             var = np.where(np.isnan(var), 0.0, var)
@@ -726,7 +726,7 @@ def load_all_data(
     data_targets = np.array(wt_temp)
 
     return total_data, total_times, data_targets, labels
-
+    
 def get_results(test_target, test_prediction, rivers, labels, test_index):
     mean_results = {k:[] for k in results.keys()}
     # Loop through each sample and compute the MSE for that sample
@@ -1020,7 +1020,7 @@ def augment_data_v0(image, label, additional_inp=None):
 
     return full_image, label
 
-def count_images(dataset):
+def count_images(dataset, augment):
     """
     Count the total number of images in a dataset.
     Args:
@@ -1029,14 +1029,25 @@ def count_images(dataset):
         Total number of images in the dataset.
     """
     total_images = 0
-    for _, images, _ in dataset:  # Iterate over (image, label) pairs
-        # Check if `images` is a list/tuple (multiple inputs to the model)
-        if isinstance(images, (list, tuple)):
-            # Add the number of samples in the first input (usually the primary data)
-            total_images += images[0].shape[0]
-        else:
-            # Single input case
-            total_images += images.shape[0]
+    if augment:
+        for _, images, _ in dataset:  # Iterate over (image, label) pairs
+            # Check if `images` is a list/tuple (multiple inputs to the model)
+            if isinstance(images, (list, tuple)):
+                # Add the number of samples in the first input (usually the primary data)
+                total_images += images[0].shape[0]
+            else:
+                # Single input case
+                total_images += images.shape[0]
+    else:
+        for _, (images, _) in dataset:  # Iterate over (image, label) pairs
+            # Check if `images` is a list/tuple (multiple inputs to the model)
+            if isinstance(images, (list, tuple)):
+                # Add the number of samples in the first input (usually the primary data)
+                total_images += images[0].shape[0]
+            else:
+                # Single input case
+                total_images += images.shape[0]
+        
     return total_images
 
 
@@ -1140,7 +1151,7 @@ def augment_data_v2(idx, inputs_label, reference, outlier_mask, additional_input
             
     return augmented_outputs
 
-def augment_data(idx, inputs_label, reference, outlier_mask, additional_inputs=False, visualize=False): 
+def augment_data(idx, inputs_label, reference, outlier_mask, W, additional_inputs=False, visualize=False): 
     if additional_inputs:
         image = tf.cast(inputs_label[0][0], dtype=tf.float32)
         additional_inp = tf.cast(inputs_label[0][1], dtype=tf.float32)
@@ -1184,7 +1195,7 @@ def augment_data(idx, inputs_label, reference, outlier_mask, additional_inputs=F
     rotations = tf.boolean_mask(rotations, valid_mask)
     num_channels = tf.get_static_value(tf.shape(image)[-1])
     rotations = tf.map_fn(
-                    lambda rot: tf.ensure_shape(rot, [64, 64, num_channels]),
+                    lambda rot: tf.ensure_shape(rot, [W, W, num_channels]),
                     rotations
                 )
 
@@ -1206,7 +1217,7 @@ def augment_data(idx, inputs_label, reference, outlier_mask, additional_inputs=F
         num_parallel_calls=tf.data.AUTOTUNE
     )
     
-    augmented_dataset = augmented_dataset.concatenate(augmented_dataset).concatenate(augmented_dataset)
+    #augmented_dataset = augmented_dataset.concatenate(augmented_dataset).concatenate(augmented_dataset)
 
     return augmented_dataset
 
@@ -1256,7 +1267,7 @@ def load_set(data_folder, inputs, split_set, var_channels, var_position):
     else:
         print(f"{split_set} model input shape: {model_input.shape}")
         
-    return model_input, additional_inputs, target
+    return model_input, additional_inputs, target #
 
 def prepare_dataset_v0(ds, target, conditioned, reference=None, augment=False):
     inputs = (ds[0], ds[1]) if conditioned else ds
@@ -1275,7 +1286,7 @@ def prepare_dataset_v0(ds, target, conditioned, reference=None, augment=False):
                                         num_parallel_calls=tf.data.AUTOTUNE)
     return dataset
 
-def prepare_dataset(ds, target, conditioned, reference=None, augment=False):
+def prepare_dataset(ds, target, conditioned, W=128, reference=None, augment=False):
     inputs = (ds[0], ds[1]) if conditioned else ds
     dataset = tf.data.Dataset.from_tensor_slices((inputs, target))
     
@@ -1288,7 +1299,7 @@ def prepare_dataset(ds, target, conditioned, reference=None, augment=False):
 
         def augment_with_index(idx, inputs_target):
             augmented = augment_data(
-                idx, inputs_target, reference, outlier_mask,
+                idx, inputs_target, reference, outlier_mask, W,
                 additional_inputs=conditioned, visualize=False
             )
             return augmented
@@ -1298,3 +1309,182 @@ def prepare_dataset(ds, target, conditioned, reference=None, augment=False):
         )
     
     return dataset_with_indices
+
+
+def load_numpy_dataset(file_path):
+    data = np.load(file_path + ".npz")
+    indices = data["indices"]
+    inputs = data["inputs"]
+    additional_inputs = data['additional_inputs']
+    print(inputs.shape,additional_inputs.shape)
+    targets = data["targets"]
+    return tf.data.Dataset.from_tensor_slices((indices, ((inputs,additional_inputs), targets)))
+
+
+def select_channels(dataset, channels_to_keep):
+    """
+    Preprocess the dataset to keep only specified channels from the inputs.
+
+    Args:
+    - dataset: tf.data.Dataset with structure (index, ((image_inputs, additional_inputs), target)).
+    - channels_to_keep: List of channel indices to keep (e.g., [0, 2]).
+
+    Returns:
+    - A preprocessed tf.data.Dataset.
+    """
+    def preprocess(index, inputs_targets):
+        inputs, target = inputs_targets
+        image_inputs, additional_inputs = inputs
+
+        # Select specific channels
+        selected_image_inputs = tf.gather(image_inputs, channels_to_keep, axis=-1)
+
+        # Return the new structure
+        return index, ((selected_image_inputs, additional_inputs), target)
+
+    return dataset.map(preprocess)
+
+
+def augment_data(idx, inputs_label, reference, outlier_mask, W, additional_inputs=False, visualize=False, augment_iterations=1): 
+    """
+    Augments the data by applying transformations to the input images. Allows for multiple augmentation iterations.
+
+    Args:
+        idx (int): Index of the data point.
+        inputs_label (tuple): Tuple containing the image and label (and additional inputs if applicable).
+        reference (tuple): Reference data containing months and coordinates.
+        outlier_mask (dict): Dictionary mapping (month, coords, label) to outlier status.
+        W (int): Image width/height.
+        additional_inputs (bool): Whether additional inputs are included.
+        visualize (bool): Whether to return augmented outputs for visualization.
+        augment_iterations (int): Number of augmentations to apply per image.
+
+    Returns:
+        tf.data.Dataset: Dataset containing augmented images and labels.
+    """
+    if additional_inputs:
+        image = tf.cast(inputs_label[0][0], dtype=tf.float32)
+        additional_inp = tf.cast(inputs_label[0][1], dtype=tf.float32)
+        label = tf.cast(inputs_label[1], dtype=tf.float32)
+    else:
+        image = tf.cast(inputs_label[0], dtype=tf.float32)
+        label = tf.cast(inputs_label[1], dtype=tf.float32)
+    
+    reference = (tf.cast(reference[0], dtype=tf.float32), tf.cast(reference[1], dtype=tf.float32))
+    reference_month = tf.gather(reference[0], idx)
+    reference_coords = tf.gather(reference[1], idx)
+
+    reference_month = tf.expand_dims(reference_month, axis=0)  # Convert to [1]
+    label = tf.expand_dims(label, axis=0) 
+
+    def get_outlier_status(month, coords, lbl):
+        python_key = (float(month), tuple(map(float, coords)), float(lbl))
+        return outlier_mask.get(python_key, False)
+    
+    is_outlier = tf.py_function(
+        func=lambda month, coords, lbl: get_outlier_status(month, coords, lbl),
+        inp=[reference_month, reference_coords, label],
+        Tout=tf.bool
+    )
+
+    # Generate base rotations
+    base_rotations = [
+        image,  # 0°
+        tf.image.rot90(image, k=1),  # 90°
+        tf.image.rot90(image, k=2),  # 180°
+        tf.image.rot90(image, k=3),  # 270°
+    ]
+
+    base_mirrors = [
+        tf.image.flip_left_right(image),  # Mirror left-to-right
+        tf.image.flip_up_down(image),    # Mirror top-to-bottom
+    ]
+
+    all_base_transformations = base_rotations + base_mirrors
+    
+    def augment(transformations, iterations):
+        """Generates multiple augmentations by repeating the transformations."""
+        return transformations * iterations
+
+    # Apply augmentations based on outlier status
+    transformations = tf.cond(
+        is_outlier,
+        lambda: augment(all_base_transformations, max(2, augment_iterations * 2)),
+        lambda: augment(all_base_transformations, augment_iterations)
+    )
+
+
+    valid_mask = tf.logical_not(tf.reduce_all(tf.equal(transformations, 0), axis=[1, 2, 3]))
+    transformations = tf.boolean_mask(transformations, valid_mask)
+    num_channels = tf.get_static_value(tf.shape(image)[-1])
+    rotations = tf.map_fn(
+                    lambda trans: tf.ensure_shape(trans, [W, W, num_channels]),
+                    transformations
+                )
+
+    def pack_output(trans):
+        if additional_inputs:
+            return idx, (trans, tf.convert_to_tensor(additional_inp)), label
+        else:
+            return idx, trans, label
+
+    if visualize:
+        visualize_augmented_outputs = [
+            {"image": trans, "label": label, "is_outlier": is_outlier} for trans in transformations
+        ]
+        return visualize_augmented_outputs
+        
+    augmented_dataset = tf.data.Dataset.from_tensor_slices(transformations).map(
+        lambda trans: pack_output(trans),
+        num_parallel_calls=tf.data.AUTOTUNE
+    )
+
+    return augmented_dataset
+
+def prepare_dataset(ds, target, conditioned, W=128, reference=None, augment=False, augment_iterations=1):
+    """
+    Prepares the dataset with optional augmentation.
+
+    Args:
+        ds (tuple): Tuple of input data.
+        target (array): Target data.
+        conditioned (bool): Whether additional inputs are included.
+        W (int): Image width/height.
+        reference (tuple): Reference data containing months and coordinates.
+        augment (bool): Whether to apply augmentation.
+        augment_iterations (int): Number of augmentations to apply per image.
+
+    Returns:
+        tf.data.Dataset: Prepared dataset.
+    """
+    inputs = (ds[0], ds[1]) if conditioned else ds
+    dataset = tf.data.Dataset.from_tensor_slices((inputs, target))
+    
+    dataset_with_indices = dataset.enumerate() 
+    
+    if augment:
+        with open('../data/external/outlier_dict.json', 'r') as json_file:
+            loaded_dict = json.load(json_file)
+        outlier_mask = {eval(key): value for key, value in loaded_dict.items()}
+
+        def augment_with_index(idx, inputs_target):
+            augmented = augment_data(
+                idx, inputs_target, reference, outlier_mask, W,
+                additional_inputs=conditioned, visualize=False, augment_iterations=augment_iterations
+            )
+            return augmented
+
+        dataset_with_indices = dataset_with_indices.flat_map(
+            augment_with_index
+        )
+    
+    return dataset_with_indices
+
+from keras import backend as K
+
+# Liberar memoria de la GPU después de cada experimento
+def clear_memory():
+    K.clear_session()
+    tf.compat.v1.reset_default_graph()
+    # Opcionalmente, también puedes usar:
+    tf.keras.backend.clear_session() 

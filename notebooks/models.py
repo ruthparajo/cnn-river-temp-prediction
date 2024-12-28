@@ -654,7 +654,7 @@ def rmse_focal(y_true, y_pred, gamma=2.0):
 
 def conservation_energy_loss(y_true, y_pred, model_input_batch, alpha=0.5, beta=0.5, threshold=5.0):
     # Calcular el promedio de los primeros tres canales de model_input_batch
-    lst_batch = tf.reduce_mean(tf.cast(model_input_batch[:, :, :, :3], 'float32'))#, axis=-1)
+    lst_batch = tf.reduce_mean(tf.cast(model_input_batch, 'float32'))#, axis=-1)
 
     # Calcular Q_in y Q_out
     Q_in = tf.maximum(lst_batch - y_pred, 0)  # Solo calor hacia el agua cuando LST > predicción
