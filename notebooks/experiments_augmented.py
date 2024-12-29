@@ -61,7 +61,7 @@ def run_experiment(data_folder, model_name, batch_size, epochs, W=256, inputs=No
     
     
     if augment:
-        dest_dir = "../data/processed_data/augmented_all_5x"
+        dest_dir = "../data/processed_data/128x128"
         train_dataset = load_numpy_dataset(f"{dest_dir}/{split_num}/train_dataset")
         channels_to_keep = [ch for k, ch in var_channels.items() if k in inputs] 
         train_dataset = select_channels(train_dataset, channels_to_keep)
@@ -261,7 +261,7 @@ def run_experiment(data_folder, model_name, batch_size, epochs, W=256, inputs=No
         opt = 'SGD'
         
     variables = '' if inputs == None else ', '.join(inputs)
-    samples_str = f'{count_im} images, all augmented 5x' #count_images(train_dataset,augment)
+    samples_str = f'{count_im} images' #count_images(train_dataset,augment)
 
     details = {'Experiment':num,'RMSE':rmse_test,'Variables':variables, 'Split_id': split_num,'Optimizer': opt, \
                'nº samples': samples_str, 'Batch size': batch_size, \
@@ -324,7 +324,7 @@ if __name__ == '__main__':
         
         
     filt_alt = False 
-    augment = True
+    augment = False
     epochs=300
     
     # Run experiments with parameter combinations

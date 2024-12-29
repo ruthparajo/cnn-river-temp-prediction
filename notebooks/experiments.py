@@ -1,12 +1,12 @@
-from functions import *
 from models import *
+from functions import *
 import matplotlib.pyplot as plt
 import glob
 from skimage.transform import resize
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
 import geopandas as gpd
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+# from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import matplotlib
 import seaborn as sns
 from sklearn.preprocessing import OneHotEncoder
