@@ -337,4 +337,6 @@ if __name__ == '__main__':
                     data_folder = f'../data/processed_data/{W}x{W}/{split}'
                     run_experiment(data_folder, model_name, batch_size, epochs, W=W, inputs=inputs, \
                                        loss_type=loss_type, filt_alt=filt_alt, num = exp_num, augment = augment, split_num = split, mode = 'Save')
-                
+
+    # python experiments_augmented.py --batch_sizes 128 --epochs_list 300 --model_names CNN_2 CNN_3 Resnet transfer_resnet --inputs 'full features' --resolution 128 --loss_type RMSE            
+    # python experiments_augmented.py --batch_sizes 128 --epochs_list 300 --model_names CNN_2 CNN_3 Resnet transfer_resnet --inputs 'image features' --resolution 128 --loss_type RMSE 
