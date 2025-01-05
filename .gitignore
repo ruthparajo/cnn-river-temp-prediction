@@ -1,4 +1,6 @@
 data/
+⁠!data/external/cos_to_month.pkl ⁠
+⁠!data/process_data/128x128/ ⁠
 trash/
 maps/
 notebooks/01-data_collection.ipynb
@@ -6,3 +8,4 @@ notebooks/03-data_preprocessing_temp.ipynb
 notebooks/03-interpolation.ipynb
 notebooks/01-river_grids_collection.ipynb
 notebooks/.ipynb_checkpoints/
+
